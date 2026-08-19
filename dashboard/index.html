@@ -102,12 +102,40 @@
   .layout { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; }
   @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
 
-  .panel { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-  .panel h2 { font-size: 13px; margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--border); font-weight: 600; }
+  .panel { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 16px; }
+  .panel h2 { font-size: 13px; margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--border); font-weight: 600; display: flex; align-items: center; justify-content: space-between; }
+  .panel h2 .hint { font-size: 11px; color: var(--text-muted); font-weight: 400; }
   #map { height: 480px; width: 100%; }
 
   .legend { display: flex; gap: 14px; padding: 8px 14px; font-size: 11px; color: var(--text-secondary); border-top: 1px solid var(--border); flex-wrap: wrap; }
   .legend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+
+  .site-label {
+    background: rgba(0,0,0,.72); color: #fff; font-size: 10.5px; font-weight: 700;
+    padding: 1px 5px; border-radius: 3px; white-space: nowrap; border: none !important;
+    box-shadow: none !important;
+  }
+  .site-label::before { display: none; }
+
+  .layers-panel-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 14px; }
+  .layers-sub h3 { font-size: 12px; margin: 0 0 8px; font-weight: 600; color: var(--text-secondary); }
+  .layers-sub .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+  .layers-sub input[type=text], .layers-sub input[type=number], .layers-sub input[type=file] {
+    padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text-primary); font-size: 12px;
+  }
+  .layers-sub input[type=number] { width: 92px; }
+  .layers-sub .coord-grid { display: grid; grid-template-columns: repeat(2, auto 92px); gap: 6px 10px; align-items: center; font-size: 11px; color: var(--text-secondary); }
+  .layer-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .layer-list li {
+    display: flex; align-items: center; gap: 8px; font-size: 12px;
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px;
+  }
+  .layer-list li .name { flex: 1; cursor: pointer; }
+  .layer-list li .name:hover { text-decoration: underline; }
+  .layer-list li input[type=range] { width: 70px; }
+  .layer-list li button { border: none; background: none; color: var(--status-critical); cursor: pointer; font-size: 12px; }
+  .layers-note { font-size: 11px; color: var(--text-muted); }
 
   .table-wrap { max-height: 480px; overflow: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
@@ -200,6 +228,43 @@
       </div>
     </div>
   </div>
+
+  <div class="panel">
+    <h2>ชั้นข้อมูลแผนที่เพิ่มเติม <span class="hint">ทดลอง — สลับพื้นหลังดาวเทียม / เพิ่ม overlay / นำเข้า KML-KMZ</span></h2>
+    <div class="layers-panel-body">
+
+      <div class="layers-sub">
+        <h3>Overlay ภาพของตัวเอง (เช่น แผนผังโครงการ)</h3>
+        <div class="row">
+          <input type="file" id="overlay-file" accept="image/*">
+          <input type="text" id="overlay-name" placeholder="ชื่อ overlay">
+        </div>
+        <div class="coord-grid">
+          <span>มุมซ้ายล่าง (SW) lat</span><input type="number" id="ov-south" step="any" placeholder="13.70">
+          <span>lng</span><input type="number" id="ov-west" step="any" placeholder="100.48">
+          <span>มุมขวาบน (NE) lat</span><input type="number" id="ov-north" step="any" placeholder="13.79">
+          <span>lng</span><input type="number" id="ov-east" step="any" placeholder="100.56">
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button class="btn" id="overlay-add-btn" type="button">เพิ่ม Overlay บนแผนที่</button>
+        </div>
+      </div>
+
+      <div class="layers-sub">
+        <h3>นำเข้าไฟล์ KML / KMZ (จาก Google Earth Pro)</h3>
+        <div class="row">
+          <input type="file" id="kml-file" accept=".kml,.kmz">
+          <button class="btn" id="kml-import-btn" type="button">นำเข้า</button>
+        </div>
+        <div class="layers-note">รองรับ Placemark (จุด/เส้น/รูปหลายเหลี่ยม) และ Ground Overlay ทั่วไป — ถ้าเป็นภาพหมุนเอียง (rotated overlay) จะแสดงแบบประมาณตำแหน่งกรอบสี่เหลี่ยม ไม่หมุนตามจริงในเวอร์ชันนี้ ไฟล์ .kmz ที่รวมรูปภาพไว้ในตัวจะนำเข้าได้ครบกว่าไฟล์ .kml เปล่า</div>
+      </div>
+
+      <div class="layers-sub">
+        <h3>ชั้นข้อมูลที่เพิ่มแล้ว</h3>
+        <ul class="layer-list" id="layer-list"><li style="color:var(--text-muted)">— ยังไม่มี —</li></ul>
+      </div>
+    </div>
+  </div>
 </main>
 
 <footer>Environmental Sample Dashboard — v0.1 alpha · ข้อมูลมาตรฐานเป็นตัวอย่างเท่านั้น ต้องตรวจสอบกับประกาศกฎหมายจริงก่อนใช้รายงาน</footer>
@@ -208,6 +273,8 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
   integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"
+  integrity="sha256-rMfkFFWoB2W1/Zx+4bgHim0WC7vKRVrq6FTeZclH1Z4=" crossorigin=""></script>
 <script>
 /* =========================================================================
    CONFIG
@@ -434,11 +501,22 @@ function statusColorHex(status) {
   return '#898781';
 }
 
+const BASE_LAYERS = {};
+
 function initMap() {
   map = L.map('map').setView([13.75, 100.52], 7);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  BASE_LAYERS.satellite = L.tileLayer(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    { maxZoom: 19, attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community' }
+  );
+  BASE_LAYERS.street = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19, attribution: '&copy; OpenStreetMap contributors',
-  }).addTo(map);
+  });
+  BASE_LAYERS.satellite.addTo(map);
+  L.control.layers(
+    { 'ภาพถ่ายดาวเทียม (Esri)': BASE_LAYERS.satellite, 'แผนที่ถนน (OSM)': BASE_LAYERS.street },
+    null, { position: 'topright' }
+  ).addTo(map);
   markerLayer = L.layerGroup().addTo(map);
 }
 
@@ -454,6 +532,7 @@ function renderMap(filteredSamples) {
     const marker = L.circleMarker([site.lat, site.lng], {
       radius: 9, weight: 2, color: '#fff', fillColor: color, fillOpacity: 0.9,
     }).addTo(markerLayer);
+    marker.bindTooltip(escapeHtml(site.site_id), { permanent: true, direction: 'top', offset: [0, -8], className: 'site-label' });
     const samples = filteredSamples.filter(s => s.site.site_id === site.site_id);
     const latest = samples[0];
     let popup = `<b>${escapeHtml(site.name)}</b><br>
@@ -555,6 +634,212 @@ document.getElementById('f-reset').addEventListener('click', () => {
   document.getElementById('f-from').value = '';
   document.getElementById('f-to').value = '';
   applyFilters();
+});
+
+/* =========================================================================
+   MAP LAYERS — custom image overlays + KML/KMZ import
+   ========================================================================= */
+
+let CUSTOM_LAYERS = []; // {id, name, kind:'image'|'feature', leafletLayer, bounds}
+let customLayerSeq = 0;
+
+function renderLayerList() {
+  const ul = document.getElementById('layer-list');
+  if (!CUSTOM_LAYERS.length) {
+    ul.innerHTML = '<li style="color:var(--text-muted)">— ยังไม่มี —</li>';
+    return;
+  }
+  ul.innerHTML = '';
+  CUSTOM_LAYERS.forEach(entry => {
+    const li = document.createElement('li');
+
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = map.hasLayer(entry.leafletLayer);
+    checkbox.addEventListener('change', () => {
+      if (checkbox.checked) entry.leafletLayer.addTo(map);
+      else map.removeLayer(entry.leafletLayer);
+    });
+    li.appendChild(checkbox);
+
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'name';
+    nameSpan.textContent = entry.name;
+    nameSpan.title = 'คลิกเพื่อซูมไปยังชั้นข้อมูลนี้';
+    nameSpan.addEventListener('click', () => {
+      if (entry.bounds) map.fitBounds(entry.bounds, { padding: [30, 30] });
+    });
+    li.appendChild(nameSpan);
+
+    if (entry.kind === 'image') {
+      const opacityInput = document.createElement('input');
+      opacityInput.type = 'range';
+      opacityInput.min = '0.1'; opacityInput.max = '1'; opacityInput.step = '0.05';
+      opacityInput.value = String(entry.leafletLayer.options.opacity ?? 0.85);
+      opacityInput.addEventListener('input', () => entry.leafletLayer.setOpacity(Number(opacityInput.value)));
+      li.appendChild(opacityInput);
+    }
+
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.textContent = 'ลบ';
+    removeBtn.addEventListener('click', () => {
+      map.removeLayer(entry.leafletLayer);
+      CUSTOM_LAYERS = CUSTOM_LAYERS.filter(e => e.id !== entry.id);
+      renderLayerList();
+    });
+    li.appendChild(removeBtn);
+
+    ul.appendChild(li);
+  });
+}
+
+function addImageOverlayLayer(name, imageUrl, bounds) {
+  const layer = L.imageOverlay(imageUrl, bounds, { opacity: 0.85 }).addTo(map);
+  CUSTOM_LAYERS.push({ id: ++customLayerSeq, name, kind: 'image', leafletLayer: layer, bounds });
+  renderLayerList();
+  map.fitBounds(bounds, { padding: [30, 30] });
+}
+
+document.getElementById('overlay-add-btn').addEventListener('click', () => {
+  const fileInput = document.getElementById('overlay-file');
+  const file = fileInput.files[0];
+  const south = parseFloat(document.getElementById('ov-south').value);
+  const west = parseFloat(document.getElementById('ov-west').value);
+  const north = parseFloat(document.getElementById('ov-north').value);
+  const east = parseFloat(document.getElementById('ov-east').value);
+  const name = document.getElementById('overlay-name').value.trim() || 'Overlay';
+  if (!file) { alert('เลือกไฟล์รูปภาพก่อน'); return; }
+  if ([south, west, north, east].some(Number.isNaN)) { alert('กรอกพิกัดมุมภาพให้ครบทั้ง 4 ช่อง'); return; }
+  const reader = new FileReader();
+  reader.onload = () => {
+    addImageOverlayLayer(name, reader.result, [[south, west], [north, east]]);
+    fileInput.value = '';
+    document.getElementById('overlay-name').value = '';
+  };
+  reader.readAsDataURL(file);
+});
+
+// --- KML / KMZ import -----------------------------------------------------
+
+function parseKmlCoordinates(text) {
+  return text.trim().split(/\s+/).filter(Boolean).map(triplet => {
+    const [lng, lat] = triplet.split(',').map(Number);
+    return [lat, lng];
+  });
+}
+
+function firstText(el, tag) {
+  const node = el.querySelector(tag);
+  return node ? node.textContent.trim() : '';
+}
+
+// resolveHref(href) -> Promise<usableUrl|null>
+async function parseKmlDocument(xmlText, resolveHref, group) {
+  const xml = new DOMParser().parseFromString(xmlText, 'text/xml');
+  let imported = 0, skipped = 0;
+  const featureBounds = [];
+
+  for (const pm of xml.querySelectorAll('Placemark')) {
+    const name = firstText(pm, 'name') || 'Placemark';
+    const point = pm.querySelector('Point > coordinates');
+    const line = pm.querySelector('LineString > coordinates');
+    const poly = pm.querySelector('Polygon outerBoundaryIs LinearRing coordinates');
+    if (point) {
+      const [latlng] = parseKmlCoordinates(point.textContent);
+      const marker = L.marker(latlng).bindPopup(escapeHtml(name)).addTo(group);
+      featureBounds.push(latlng);
+      imported++;
+    } else if (line) {
+      const latlngs = parseKmlCoordinates(line.textContent);
+      L.polyline(latlngs, { color: '#2a78d6', weight: 3 }).bindPopup(escapeHtml(name)).addTo(group);
+      featureBounds.push(...latlngs);
+      imported++;
+    } else if (poly) {
+      const latlngs = parseKmlCoordinates(poly.textContent);
+      L.polygon(latlngs, { color: '#eb6834', weight: 2, fillOpacity: 0.15 }).bindPopup(escapeHtml(name)).addTo(group);
+      featureBounds.push(...latlngs);
+      imported++;
+    }
+  }
+
+  for (const go of xml.querySelectorAll('GroundOverlay')) {
+    const name = firstText(go, 'name') || 'Ground Overlay';
+    const href = firstText(go, 'Icon > href');
+    if (!href) { skipped++; continue; }
+    const url = await resolveHref(href);
+    if (!url) { skipped++; continue; }
+
+    const box = go.querySelector('LatLonBox');
+    let sw, ne;
+    if (box) {
+      const north = parseFloat(firstText(box, 'north'));
+      const south = parseFloat(firstText(box, 'south'));
+      const east = parseFloat(firstText(box, 'east'));
+      const west = parseFloat(firstText(box, 'west'));
+      sw = [south, west]; ne = [north, east];
+    } else {
+      const quad = go.querySelector('LatLonQuad coordinates, [*|LatLonQuad] coordinates');
+      if (!quad) { skipped++; continue; }
+      const pts = parseKmlCoordinates(quad.textContent);
+      const lats = pts.map(p => p[0]), lngs = pts.map(p => p[1]);
+      sw = [Math.min(...lats), Math.min(...lngs)];
+      ne = [Math.max(...lats), Math.max(...lngs)];
+    }
+    const layer = L.imageOverlay(url, [sw, ne], { opacity: 0.85 }).addTo(group);
+    CUSTOM_LAYERS.push({ id: ++customLayerSeq, name: `[KML] ${name}`, kind: 'image', leafletLayer: layer, bounds: [sw, ne] });
+    featureBounds.push(sw, ne);
+    imported++;
+  }
+
+  return { imported, skipped, featureBounds };
+}
+
+document.getElementById('kml-import-btn').addEventListener('click', async () => {
+  const fileInput = document.getElementById('kml-file');
+  const file = fileInput.files[0];
+  if (!file) { alert('เลือกไฟล์ .kml หรือ .kmz ก่อน'); return; }
+
+  const group = L.layerGroup().addTo(map);
+  let imported = 0, skipped = 0, featureBounds = [];
+
+  try {
+    if (/\.kmz$/i.test(file.name)) {
+      const zip = await JSZip.loadAsync(file);
+      const kmlEntry = Object.values(zip.files).find(f => /\.kml$/i.test(f.name));
+      if (!kmlEntry) throw new Error('ไม่พบไฟล์ .kml ภายใน .kmz');
+      const kmlText = await kmlEntry.async('text');
+      const resolveHref = async (href) => {
+        const norm = href.replace(/^\.?\//, '');
+        const entry = zip.file(norm) || zip.file(href) || Object.values(zip.files).find(f => f.name.endsWith(href));
+        if (!entry) return null;
+        const blob = await entry.async('blob');
+        return URL.createObjectURL(blob);
+      };
+      ({ imported, skipped, featureBounds } = await parseKmlDocument(kmlText, resolveHref, group));
+    } else {
+      const kmlText = await file.text();
+      const resolveHref = async (href) => (/^https?:\/\//i.test(href) ? href : null);
+      ({ imported, skipped, featureBounds } = await parseKmlDocument(kmlText, resolveHref, group));
+    }
+  } catch (err) {
+    console.error(err);
+    map.removeLayer(group);
+    alert('นำเข้าไฟล์ไม่สำเร็จ: ' + err.message);
+    return;
+  }
+
+  if (imported === 0) {
+    map.removeLayer(group);
+    alert('ไม่พบข้อมูลที่นำเข้าได้จากไฟล์นี้');
+    return;
+  }
+
+  CUSTOM_LAYERS.push({ id: ++customLayerSeq, name: `[KML] ${file.name} (${imported} รายการ)`, kind: 'feature', leafletLayer: group, bounds: featureBounds.length ? featureBounds : null });
+  renderLayerList();
+  if (featureBounds.length) map.fitBounds(featureBounds, { padding: [30, 30] });
+  fileInput.value = '';
+  if (skipped > 0) alert(`นำเข้าสำเร็จ ${imported} รายการ, ข้าม ${skipped} รายการ (มักเป็น Ground Overlay ที่หารูปภาพอ้างอิงไม่พบ — ใช้ไฟล์ .kmz แทน .kml จะช่วยได้)`);
 });
 
 /* =========================================================================
