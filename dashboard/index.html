@@ -22,6 +22,7 @@
     --status-good:    #0ca30c;
     --status-critical:#d03b3b;
     --status-none:    #898781;
+    --series-source:  #4a3aa7;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
@@ -39,6 +40,7 @@
       --status-good:    #0ca30c;
       --status-critical:#e66767;
       --status-none:    #898781;
+      --series-source:  #9085e9;
     }
   }
   * { box-sizing: border-box; }
@@ -116,6 +118,16 @@
     box-shadow: none !important;
   }
   .site-label::before { display: none; }
+
+  .source-marker-inner {
+    width: 16px; height: 16px; background: var(--series-source); border: 2px solid #fff;
+    transform: rotate(45deg); box-shadow: 0 0 0 1px rgba(0,0,0,.3);
+  }
+  .dist-label {
+    background: rgba(255,255,255,.9); color: #333; font-size: 10px; font-weight: 600;
+    padding: 0 4px; border-radius: 3px; border: none !important; box-shadow: none !important;
+  }
+  .dist-label::before { display: none; }
 
   .layers-panel-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 14px; }
   .layers-sub h3 { font-size: 12px; margin: 0 0 8px; font-weight: 600; color: var(--text-secondary); }
@@ -200,6 +212,7 @@
     </label>
     <label>จากวันที่ <input type="date" id="f-from"></label>
     <label>ถึงวันที่ <input type="date" id="f-to"></label>
+    <label><input type="checkbox" id="f-show-dist" checked> แสดงเส้น + ระยะห่างจากแหล่งกำเนิด</label>
     <div class="spacer"></div>
     <button class="reset" id="f-reset">ล้างตัวกรอง</button>
   </div>
@@ -212,6 +225,7 @@
         <span><span class="dot" style="background:var(--status-good)"></span>ผ่านมาตรฐาน</span>
         <span><span class="dot" style="background:var(--status-critical)"></span>เกินมาตรฐาน</span>
         <span><span class="dot" style="background:var(--status-none)"></span>ไม่มีมาตรฐานเทียบ / ไม่มีข้อมูล</span>
+        <span><span class="dot" style="background:var(--series-source)"></span>แหล่งกำเนิด/จุดอ้างอิง (◆)</span>
       </div>
     </div>
     <div class="panel">
@@ -220,7 +234,7 @@
         <table>
           <thead>
             <tr>
-              <th>จุด</th><th>ประเภท</th><th>วันที่</th><th>สถานะ</th><th>ค่าที่เกินมาตรฐาน</th><th>รูป</th>
+              <th>จุด</th><th>ประเภท</th><th>วันที่</th><th>สถานะ</th><th>ค่าที่เกินมาตรฐาน</th><th>ระยะจากแหล่งกำเนิด</th><th>รูป</th>
             </tr>
           </thead>
           <tbody id="results-tbody"></tbody>
@@ -310,9 +324,9 @@ const PARAM_CONFIG = {
   ],
 };
 
-const TYPE_LABEL = { soil: 'ดิน', water: 'น้ำ', air: 'อากาศ' };
-const TYPE_COLOR = { soil: 'var(--series-soil)', water: 'var(--series-water)', air: 'var(--series-air)' };
-const TYPE_COLOR_HEX = { soil: '#eb6834', water: '#2a78d6', air: '#1baf7a' };
+const TYPE_LABEL = { soil: 'ดิน', water: 'น้ำ', air: 'อากาศ', source: 'แหล่งกำเนิด/จุดอ้างอิง' };
+const TYPE_COLOR = { soil: 'var(--series-soil)', water: 'var(--series-water)', air: 'var(--series-air)', source: 'var(--series-source)' };
+const TYPE_COLOR_HEX = { soil: '#eb6834', water: '#2a78d6', air: '#1baf7a', source: '#4a3aa7' };
 
 const SHEET_TABS = { sites: 'Sites', soil: 'Soil_Results', water: 'Water_Results', air: 'Air_Results', standards: 'Standards' };
 
@@ -329,6 +343,8 @@ const DEMO = {
     { site_id: 'S-004', name: 'ดินบริเวณบ่อพักกากของเสีย', type: 'soil', lat: 13.7050, lng: 100.5400, project: 'โครงการทดสอบ A' },
     { site_id: 'S-005', name: 'สถานีตรวจวัดอากาศ ชุมชนใกล้เคียง', type: 'air', lat: 13.7700, lng: 100.5550, project: 'โครงการทดสอบ B' },
     { site_id: 'S-006', name: 'สถานีตรวจวัดอากาศ แนวรั้วโรงงาน', type: 'air', lat: 13.7420, lng: 100.4700, project: 'โครงการทดสอบ B' },
+    { site_id: 'SRC-1', name: 'โรงงานอุตสาหกรรม (แหล่งกำเนิด)', type: 'source', lat: 13.7180, lng: 100.5150, project: 'โครงการทดสอบ A' },
+    { site_id: 'SRC-2', name: 'ปล่องระบายอากาศ (แหล่งกำเนิด)', type: 'source', lat: 13.7560, lng: 100.5620, project: 'โครงการทดสอบ B' },
   ],
   water: [
     { site_id: 'S-001', date: '2026-07-10', sampler: 'สมชาย', ph: 7.1, do: 6.2, bod: 1.8, turbidity: 4, coliform: 200, pb: 0.005, photo_url: '' },
@@ -501,6 +517,39 @@ function statusColorHex(status) {
   return '#898781';
 }
 
+// --- distance from source -------------------------------------------------
+
+function haversineKm(a, b) {
+  const R = 6371;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(b[0] - a[0]);
+  const dLng = toRad(b[1] - a[1]);
+  const lat1 = toRad(a[0]), lat2 = toRad(b[0]);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.asin(Math.sqrt(h));
+}
+
+function formatDistanceKm(km) {
+  return km < 1 ? `${Math.round(km * 1000)} ม.` : `${km.toFixed(2)} กม.`;
+}
+
+// Sources sharing the same `project` value as the given site.
+function sourcesForProject(project) {
+  return DATA.sites.filter(s => s.type === 'source' && (s.project || '') === (project || ''));
+}
+
+// {distanceKm, source} of the nearest source in the same project, or null.
+function nearestSource(site) {
+  const sources = sourcesForProject(site.project);
+  if (!sources.length) return null;
+  let best = null;
+  for (const src of sources) {
+    const km = haversineKm([site.lat, site.lng], [src.lat, src.lng]);
+    if (!best || km < best.distanceKm) best = { distanceKm: km, source: src };
+  }
+  return best;
+}
+
 const BASE_LAYERS = {};
 
 function initMap() {
@@ -520,12 +569,25 @@ function initMap() {
   markerLayer = L.layerGroup().addTo(map);
 }
 
+const SOURCE_ICON = L.divIcon({
+  className: '', html: '<div class="source-marker-inner"></div>', iconSize: [16, 16], iconAnchor: [8, 8],
+});
+
 function renderMap(filteredSamples) {
   markerLayer.clearLayers();
   const visibleSiteIds = new Set(filteredSamples.map(s => s.site.site_id));
-  const sitesToShow = DATA.sites.filter(s => visibleSiteIds.has(s.site_id) || filteredSamples.length === ALL_SAMPLES.length);
   const bounds = [];
-  DATA.sites.forEach(site => {
+  const showDist = document.getElementById('f-show-dist').checked;
+
+  // Source / reference points — always shown, not tied to sample filters.
+  DATA.sites.filter(s => s.type === 'source').forEach(site => {
+    const marker = L.marker([site.lat, site.lng], { icon: SOURCE_ICON }).addTo(markerLayer);
+    marker.bindTooltip(escapeHtml(site.site_id), { permanent: true, direction: 'top', offset: [0, -8], className: 'site-label' });
+    marker.bindPopup(`<b>${escapeHtml(site.name)}</b><br><span style="color:#666">${escapeHtml(site.site_id)} · แหล่งกำเนิด/จุดอ้างอิง</span><br>โครงการ: ${escapeHtml(site.project || '-')}`);
+    bounds.push([site.lat, site.lng]);
+  });
+
+  DATA.sites.filter(s => s.type !== 'source').forEach(site => {
     if (!visibleSiteIds.has(site.site_id)) return;
     const status = siteStatus(site);
     const color = statusColorHex(status);
@@ -535,6 +597,7 @@ function renderMap(filteredSamples) {
     marker.bindTooltip(escapeHtml(site.site_id), { permanent: true, direction: 'top', offset: [0, -8], className: 'site-label' });
     const samples = filteredSamples.filter(s => s.site.site_id === site.site_id);
     const latest = samples[0];
+    const nearest = nearestSource(site);
     let popup = `<b>${escapeHtml(site.name)}</b><br>
       <span style="color:#666">${escapeHtml(site.site_id)} · ${TYPE_LABEL[site.type] || site.type}</span><br>
       โครงการ: ${escapeHtml(site.project || '-')}<br>
@@ -542,9 +605,20 @@ function renderMap(filteredSamples) {
     if (latest) {
       popup += `<br>ล่าสุด: ${escapeHtml(latest.date)} — สถานะ: ${statusLabel(latest.evalResult.status)}`;
     }
+    if (nearest) {
+      popup += `<br>ระยะจาก ${escapeHtml(nearest.source.site_id)}: ${formatDistanceKm(nearest.distanceKm)}`;
+    }
     marker.bindPopup(popup);
     bounds.push([site.lat, site.lng]);
+
+    if (showDist && nearest) {
+      const line = L.polyline([[site.lat, site.lng], [nearest.source.lat, nearest.source.lng]], {
+        color: '#4a3aa7', weight: 1.5, dashArray: '4,5', opacity: 0.7,
+      }).addTo(markerLayer);
+      line.bindTooltip(formatDistanceKm(nearest.distanceKm), { permanent: true, direction: 'center', className: 'dist-label' });
+    }
   });
+
   if (bounds.length) map.fitBounds(bounds, { padding: [30, 30], maxZoom: 13 });
 }
 
@@ -561,7 +635,7 @@ function escapeHtml(str) {
 function renderTable(filteredSamples) {
   const tbody = document.getElementById('results-tbody');
   if (!filteredSamples.length) {
-    tbody.innerHTML = `<tr class="empty-row"><td colspan="6">ไม่พบข้อมูลตามตัวกรองที่เลือก</td></tr>`;
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="7">ไม่พบข้อมูลตามตัวกรองที่เลือก</td></tr>`;
     return;
   }
   tbody.innerHTML = filteredSamples.map(s => {
@@ -573,12 +647,17 @@ function renderTable(filteredSamples) {
     const photoCell = photo
       ? `<img class="thumb" src="${photo}" data-full="${driveThumb(s.row.photo_url, 1200)}" onclick="openPhoto(this.dataset.full)">`
       : `<span class="no-photo">ไม่มีรูป</span>`;
+    const nearest = nearestSource(s.site);
+    const distCell = nearest
+      ? `${formatDistanceKm(nearest.distanceKm)} <span style="color:var(--text-muted)">จาก ${escapeHtml(nearest.source.site_id)}</span>`
+      : '<span style="color:var(--text-muted)">–</span>';
     return `<tr>
       <td>${escapeHtml(s.site.name)}<br><span style="color:var(--text-muted);font-size:11px">${escapeHtml(s.site.site_id)}</span></td>
       <td><span class="type-chip" style="background:${TYPE_COLOR_HEX[s.type]}">${TYPE_LABEL[s.type]}</span></td>
       <td>${escapeHtml(s.date)}</td>
       <td><span class="badge ${badgeClass}">${statusLabel(s.evalResult.status)}</span></td>
       <td>${failedText}</td>
+      <td>${distCell}</td>
       <td>${photoCell}</td>
     </tr>`;
   }).join('');
@@ -625,7 +704,7 @@ function renderAll() {
   applyFilters();
 }
 
-['f-type', 'f-status', 'f-from', 'f-to'].forEach(id => {
+['f-type', 'f-status', 'f-from', 'f-to', 'f-show-dist'].forEach(id => {
   document.getElementById(id).addEventListener('change', applyFilters);
 });
 document.getElementById('f-reset').addEventListener('click', () => {
