@@ -98,6 +98,11 @@
     padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border);
     background: var(--surface-2); color: var(--text-primary); font-size: 12px;
   }
+  .filters input[type=color] {
+    width: 28px; height: 24px; padding: 1px; border-radius: 5px; border: 1px solid var(--border);
+    background: var(--surface-2); cursor: pointer;
+  }
+  .filters input[type=range] { width: 70px; vertical-align: middle; }
   .filters .spacer { flex: 1; }
   .filters .reset { font-size: 12px; color: var(--series-water); cursor: pointer; background: none; border: none; }
 
@@ -213,6 +218,15 @@
     <label>จากวันที่ <input type="date" id="f-from"></label>
     <label>ถึงวันที่ <input type="date" id="f-to"></label>
     <label><input type="checkbox" id="f-show-dist" checked> แสดงเส้น + ระยะห่างจากแหล่งกำเนิด</label>
+    <label>สีเส้น <input type="color" id="dist-color" value="#4a3aa7"></label>
+    <label>ความเข้ม <input type="range" id="dist-opacity" min="0.15" max="1" step="0.05" value="0.7"></label>
+    <label>ทศนิยมระยะทาง
+      <select id="dist-decimals">
+        <option value="0">จำนวนเต็ม</option>
+        <option value="1">1 ตำแหน่ง</option>
+        <option value="2" selected>2 ตำแหน่ง</option>
+      </select>
+    </label>
     <div class="spacer"></div>
     <button class="reset" id="f-reset">ล้างตัวกรอง</button>
   </div>
@@ -530,7 +544,8 @@ function haversineKm(a, b) {
 }
 
 function formatDistanceKm(km) {
-  return km < 1 ? `${Math.round(km * 1000)} ม.` : `${km.toFixed(2)} กม.`;
+  const decimals = Number(document.getElementById('dist-decimals').value);
+  return km < 1 ? `${Math.round(km * 1000)} ม.` : `${km.toFixed(decimals)} กม.`;
 }
 
 // Sources sharing the same `project` value as the given site.
@@ -612,8 +627,10 @@ function renderMap(filteredSamples) {
     bounds.push([site.lat, site.lng]);
 
     if (showDist && nearest) {
+      const lineColor = document.getElementById('dist-color').value;
+      const lineOpacity = Number(document.getElementById('dist-opacity').value);
       const line = L.polyline([[site.lat, site.lng], [nearest.source.lat, nearest.source.lng]], {
-        color: '#4a3aa7', weight: 1.5, dashArray: '4,5', opacity: 0.7,
+        color: lineColor, weight: 1.5, dashArray: '4,5', opacity: lineOpacity,
       }).addTo(markerLayer);
       line.bindTooltip(formatDistanceKm(nearest.distanceKm), { permanent: true, direction: 'center', className: 'dist-label' });
     }
@@ -704,9 +721,10 @@ function renderAll() {
   applyFilters();
 }
 
-['f-type', 'f-status', 'f-from', 'f-to', 'f-show-dist'].forEach(id => {
+['f-type', 'f-status', 'f-from', 'f-to', 'f-show-dist', 'dist-color', 'dist-decimals'].forEach(id => {
   document.getElementById(id).addEventListener('change', applyFilters);
 });
+document.getElementById('dist-opacity').addEventListener('input', applyFilters);
 document.getElementById('f-reset').addEventListener('click', () => {
   document.getElementById('f-type').value = 'all';
   document.getElementById('f-status').value = 'all';
