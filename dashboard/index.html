@@ -1,0 +1,599 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Environmental Sample Dashboard — v0.1 alpha</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --surface-2:      #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --border:         rgba(11,11,11,0.10);
+    --series-water:   #2a78d6;
+    --series-soil:    #eb6834;
+    --series-air:     #1baf7a;
+    --status-good:    #0ca30c;
+    --status-critical:#d03b3b;
+    --status-none:    #898781;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --surface-2:      #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --gridline:       #2c2c2a;
+      --border:         rgba(255,255,255,0.10);
+      --series-water:   #3987e5;
+      --series-soil:    #d95926;
+      --series-air:     #199e70;
+      --status-good:    #0ca30c;
+      --status-critical:#e66767;
+      --status-none:    #898781;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--surface-2);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", "Sarabun", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  header {
+    padding: 14px 20px;
+    background: var(--surface-1);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .ver { color: var(--text-muted); font-size: 12px; font-weight: 400; margin-left: 6px; }
+  .sheet-config { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .sheet-config input[type=text] {
+    width: 260px; padding: 6px 8px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface-1); color: var(--text-primary); font-size: 12px;
+  }
+  .sheet-config button, .btn {
+    padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--series-water); color: #fff; font-size: 12px; cursor: pointer; font-weight: 500;
+  }
+  .sheet-config button.secondary { background: transparent; color: var(--text-secondary); }
+  #status-banner {
+    display: none; padding: 8px 20px; font-size: 12px; background: #fff7e6; color: #6b4f00; border-bottom: 1px solid var(--border);
+  }
+  :root:not([data-theme="light"]) #status-banner { background: #2a2410; color: #eda100; }
+  #status-banner.show { display: block; }
+
+  main { padding: 16px 20px; max-width: 1400px; margin: 0 auto; }
+
+  .stat-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+  @media (max-width: 700px) { .stat-tiles { grid-template-columns: repeat(2, 1fr); } }
+  .tile {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
+  }
+  .tile .label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+  .tile .value { font-size: 26px; font-weight: 600; margin-top: 2px; font-variant-numeric: proportional-nums; }
+  .tile.good .value { color: var(--status-good); }
+  .tile.critical .value { color: var(--status-critical); }
+
+  .filters {
+    display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 12px; margin-bottom: 14px;
+  }
+  .filters label { font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
+  .filters select, .filters input[type=date] {
+    padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text-primary); font-size: 12px;
+  }
+  .filters .spacer { flex: 1; }
+  .filters .reset { font-size: 12px; color: var(--series-water); cursor: pointer; background: none; border: none; }
+
+  .layout { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; }
+  @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
+
+  .panel { background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+  .panel h2 { font-size: 13px; margin: 0; padding: 10px 14px; border-bottom: 1px solid var(--border); font-weight: 600; }
+  #map { height: 480px; width: 100%; }
+
+  .legend { display: flex; gap: 14px; padding: 8px 14px; font-size: 11px; color: var(--text-secondary); border-top: 1px solid var(--border); flex-wrap: wrap; }
+  .legend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 5px; vertical-align: -1px; }
+
+  .table-wrap { max-height: 480px; overflow: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  thead th {
+    position: sticky; top: 0; background: var(--surface-1); text-align: left; color: var(--text-muted);
+    font-weight: 500; padding: 8px 10px; border-bottom: 1px solid var(--gridline); white-space: nowrap;
+  }
+  tbody td { padding: 7px 10px; border-bottom: 1px solid var(--gridline); vertical-align: middle; }
+  tbody tr:hover { background: var(--surface-2); }
+  .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; }
+  .badge.good { color: var(--status-good); background: color-mix(in srgb, var(--status-good) 14%, transparent); }
+  .badge.critical { color: var(--status-critical); background: color-mix(in srgb, var(--status-critical) 14%, transparent); }
+  .badge.none { color: var(--status-none); background: color-mix(in srgb, var(--status-none) 14%, transparent); }
+  .type-chip { font-size: 11px; padding: 2px 7px; border-radius: 5px; color: #fff; font-weight: 500; }
+  .thumb { width: 32px; height: 32px; border-radius: 5px; object-fit: cover; border: 1px solid var(--border); cursor: pointer; }
+  .no-photo { color: var(--text-muted); font-size: 11px; }
+  .param-fail { color: var(--status-critical); font-weight: 600; }
+  .empty-row td { text-align: center; color: var(--text-muted); padding: 24px; }
+
+  #photo-modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.7); z-index: 1000; align-items: center; justify-content: center; }
+  #photo-modal.show { display: flex; }
+  #photo-modal img { max-width: 90vw; max-height: 90vh; border-radius: 8px; }
+
+  footer { text-align: center; color: var(--text-muted); font-size: 11px; padding: 20px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>ระบบติดตามตัวอย่างสิ่งแวดล้อม <span class="ver">v0.1 alpha — ทดสอบ</span></h1>
+  <div class="sheet-config">
+    <input type="text" id="sheet-id-input" placeholder="วาง Google Sheet ID ที่นี่ (เว้นว่าง = ใช้ข้อมูลตัวอย่าง)">
+    <button id="load-btn">โหลดข้อมูล</button>
+    <button class="secondary" id="demo-btn">ใช้ข้อมูลตัวอย่าง</button>
+  </div>
+</header>
+<div id="status-banner"></div>
+
+<main>
+  <div class="stat-tiles">
+    <div class="tile"><div class="label">จุดเก็บตัวอย่างทั้งหมด</div><div class="value" id="stat-sites">–</div></div>
+    <div class="tile"><div class="label">จำนวนตัวอย่างทั้งหมด</div><div class="value" id="stat-samples">–</div></div>
+    <div class="tile good"><div class="label">ผ่านมาตรฐาน</div><div class="value" id="stat-pass">–</div></div>
+    <div class="tile critical"><div class="label">เกินมาตรฐาน</div><div class="value" id="stat-fail">–</div></div>
+  </div>
+
+  <div class="filters">
+    <label>ประเภท
+      <select id="f-type">
+        <option value="all">ทั้งหมด</option>
+        <option value="soil">ดิน</option>
+        <option value="water">น้ำ</option>
+        <option value="air">อากาศ</option>
+      </select>
+    </label>
+    <label>สถานะ
+      <select id="f-status">
+        <option value="all">ทั้งหมด</option>
+        <option value="good">ผ่านมาตรฐาน</option>
+        <option value="critical">เกินมาตรฐาน</option>
+      </select>
+    </label>
+    <label>จากวันที่ <input type="date" id="f-from"></label>
+    <label>ถึงวันที่ <input type="date" id="f-to"></label>
+    <div class="spacer"></div>
+    <button class="reset" id="f-reset">ล้างตัวกรอง</button>
+  </div>
+
+  <div class="layout">
+    <div class="panel">
+      <h2>แผนที่จุดเก็บตัวอย่าง</h2>
+      <div id="map"></div>
+      <div class="legend">
+        <span><span class="dot" style="background:var(--status-good)"></span>ผ่านมาตรฐาน</span>
+        <span><span class="dot" style="background:var(--status-critical)"></span>เกินมาตรฐาน</span>
+        <span><span class="dot" style="background:var(--status-none)"></span>ไม่มีมาตรฐานเทียบ / ไม่มีข้อมูล</span>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>รายการผลตรวจ</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>จุด</th><th>ประเภท</th><th>วันที่</th><th>สถานะ</th><th>ค่าที่เกินมาตรฐาน</th><th>รูป</th>
+            </tr>
+          </thead>
+          <tbody id="results-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer>Environmental Sample Dashboard — v0.1 alpha · ข้อมูลมาตรฐานเป็นตัวอย่างเท่านั้น ต้องตรวจสอบกับประกาศกฎหมายจริงก่อนใช้รายงาน</footer>
+
+<div id="photo-modal"><img id="photo-modal-img" src="" alt=""></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+/* =========================================================================
+   CONFIG
+   ========================================================================= */
+
+// Parameter definitions per sample type. `key` MUST match the column header
+// in the corresponding Google Sheet tab (see /sheets-template).
+const PARAM_CONFIG = {
+  soil: [
+    { key: 'ph', label: 'pH' },
+    { key: 'organic_matter', label: 'อินทรียวัตถุ (%)' },
+    { key: 'pb', label: 'ตะกั่ว Pb (mg/kg)' },
+    { key: 'cd', label: 'แคดเมียม Cd (mg/kg)' },
+    { key: 'cr', label: 'โครเมียม Cr (mg/kg)' },
+    { key: 'as', label: 'สารหนู As (mg/kg)' },
+    { key: 'hg', label: 'ปรอท Hg (mg/kg)' },
+  ],
+  water: [
+    { key: 'ph', label: 'pH' },
+    { key: 'do', label: 'DO (mg/L)' },
+    { key: 'bod', label: 'BOD (mg/L)' },
+    { key: 'turbidity', label: 'ความขุ่น (NTU)' },
+    { key: 'coliform', label: 'Coliform (MPN/100ml)' },
+    { key: 'pb', label: 'ตะกั่ว Pb (mg/L)' },
+  ],
+  air: [
+    { key: 'pm25', label: 'PM2.5 (µg/m³)' },
+    { key: 'pm10', label: 'PM10 (µg/m³)' },
+    { key: 'so2', label: 'SO2 (ppb)' },
+    { key: 'no2', label: 'NO2 (ppb)' },
+    { key: 'co', label: 'CO (ppm)' },
+    { key: 'noise', label: 'ระดับเสียง (dBA)' },
+  ],
+};
+
+const TYPE_LABEL = { soil: 'ดิน', water: 'น้ำ', air: 'อากาศ' };
+const TYPE_COLOR = { soil: 'var(--series-soil)', water: 'var(--series-water)', air: 'var(--series-air)' };
+const TYPE_COLOR_HEX = { soil: '#eb6834', water: '#2a78d6', air: '#1baf7a' };
+
+const SHEET_TABS = { sites: 'Sites', soil: 'Soil_Results', water: 'Water_Results', air: 'Air_Results', standards: 'Standards' };
+
+/* =========================================================================
+   DEMO DATA — used when no Sheet ID is configured, or the sheet can't be
+   reached. Replace with your own Google Sheet once it's set up.
+   ========================================================================= */
+
+const DEMO = {
+  sites: [
+    { site_id: 'S-001', name: 'บ่อสังเกตการณ์น้ำใต้ดิน จุด 1', type: 'water', lat: 13.7563, lng: 100.5018, project: 'โครงการทดสอบ A' },
+    { site_id: 'S-002', name: 'คลองสาธารณะ ท้ายโรงงาน', type: 'water', lat: 13.7301, lng: 100.5231, project: 'โครงการทดสอบ A' },
+    { site_id: 'S-003', name: 'แปลงดินเกษตร รอบพื้นที่โครงการ', type: 'soil', lat: 13.7890, lng: 100.4890, project: 'โครงการทดสอบ A' },
+    { site_id: 'S-004', name: 'ดินบริเวณบ่อพักกากของเสีย', type: 'soil', lat: 13.7050, lng: 100.5400, project: 'โครงการทดสอบ A' },
+    { site_id: 'S-005', name: 'สถานีตรวจวัดอากาศ ชุมชนใกล้เคียง', type: 'air', lat: 13.7700, lng: 100.5550, project: 'โครงการทดสอบ B' },
+    { site_id: 'S-006', name: 'สถานีตรวจวัดอากาศ แนวรั้วโรงงาน', type: 'air', lat: 13.7420, lng: 100.4700, project: 'โครงการทดสอบ B' },
+  ],
+  water: [
+    { site_id: 'S-001', date: '2026-07-10', sampler: 'สมชาย', ph: 7.1, do: 6.2, bod: 1.8, turbidity: 4, coliform: 200, pb: 0.005, photo_url: '' },
+    { site_id: 'S-002', date: '2026-07-10', sampler: 'สมชาย', ph: 6.4, do: 2.1, bod: 12.5, turbidity: 35, coliform: 9000, pb: 0.08, photo_url: '' },
+    { site_id: 'S-001', date: '2026-08-05', sampler: 'มานี', ph: 7.3, do: 6.8, bod: 1.5, turbidity: 3, coliform: 150, pb: 0.004, photo_url: '' },
+  ],
+  soil: [
+    { site_id: 'S-003', date: '2026-07-11', sampler: 'สมชาย', ph: 6.8, organic_matter: 3.1, pb: 45, cd: 0.3, cr: 30, as: 2.1, hg: 0.05, photo_url: '' },
+    { site_id: 'S-004', date: '2026-07-11', sampler: 'สมชาย', ph: 5.9, organic_matter: 1.2, pb: 420, cd: 5.6, cr: 88, as: 12.4, hg: 0.9, photo_url: '' },
+  ],
+  air: [
+    { site_id: 'S-005', date: '2026-08-01', sampler: 'มานี', pm25: 28, pm10: 55, so2: 4, no2: 15, co: 2, noise: 58, photo_url: '' },
+    { site_id: 'S-006', date: '2026-08-01', sampler: 'มานี', pm25: 62, pm10: 130, so2: 12, no2: 40, co: 5, noise: 78, photo_url: '' },
+  ],
+  // EXAMPLE thresholds only — NOT verified legal values. Replace with the
+  // actual figures from the relevant ประกาศกระทรวงทรัพยากรธรรมชาติและสิ่งแวดล้อม
+  // (or other applicable notification) before using this for real reporting.
+  standards: [
+    { sample_type: 'water', parameter: 'ph', min: 5, max: 9 },
+    { sample_type: 'water', parameter: 'do', min: 4, max: '' },
+    { sample_type: 'water', parameter: 'bod', min: '', max: 4 },
+    { sample_type: 'water', parameter: 'turbidity', min: '', max: 20 },
+    { sample_type: 'water', parameter: 'coliform', min: '', max: 5000 },
+    { sample_type: 'water', parameter: 'pb', min: '', max: 0.05 },
+    { sample_type: 'soil', parameter: 'ph', min: 4.5, max: 8.5 },
+    { sample_type: 'soil', parameter: 'pb', min: '', max: 400 },
+    { sample_type: 'soil', parameter: 'cd', min: '', max: 5 },
+    { sample_type: 'soil', parameter: 'cr', min: '', max: 300 },
+    { sample_type: 'soil', parameter: 'as', min: '', max: 3.9 },
+    { sample_type: 'soil', parameter: 'hg', min: '', max: 0.8 },
+    { sample_type: 'air', parameter: 'pm25', min: '', max: 37.5 },
+    { sample_type: 'air', parameter: 'pm10', min: '', max: 120 },
+    { sample_type: 'air', parameter: 'so2', min: '', max: 100 },
+    { sample_type: 'air', parameter: 'no2', min: '', max: 170 },
+    { sample_type: 'air', parameter: 'noise', min: '', max: 70 },
+  ],
+};
+
+/* =========================================================================
+   DATA LOADING — Google Sheets (gviz) with demo-data fallback
+   ========================================================================= */
+
+function gvizUrl(sheetId, tabName) {
+  return `https://docs.google.com/spreadsheets/d/${encodeURIComponent(sheetId)}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(tabName)}`;
+}
+
+async function fetchTab(sheetId, tabName) {
+  const res = await fetch(gvizUrl(sheetId, tabName));
+  if (!res.ok) throw new Error('sheet fetch failed: ' + tabName);
+  const text = await res.text();
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  const json = JSON.parse(text.substring(start, end + 1));
+  const cols = json.table.cols.map((c, i) => (c.label || c.id || ('col' + i)).trim());
+  return json.table.rows.map(r => {
+    const obj = {};
+    cols.forEach((c, i) => {
+      const cell = r.c[i];
+      obj[c] = cell ? (cell.v ?? '') : '';
+    });
+    return obj;
+  });
+}
+
+async function loadFromSheet(sheetId) {
+  const [sites, soil, water, air, standards] = await Promise.all([
+    fetchTab(sheetId, SHEET_TABS.sites),
+    fetchTab(sheetId, SHEET_TABS.soil),
+    fetchTab(sheetId, SHEET_TABS.water),
+    fetchTab(sheetId, SHEET_TABS.air),
+    fetchTab(sheetId, SHEET_TABS.standards),
+  ]);
+  return { sites, soil, water, air, standards };
+}
+
+function showBanner(msg) {
+  const el = document.getElementById('status-banner');
+  el.textContent = msg;
+  el.classList.add('show');
+}
+function hideBanner() {
+  document.getElementById('status-banner').classList.remove('show');
+}
+
+/* =========================================================================
+   EVALUATION — compare results against Standards
+   ========================================================================= */
+
+let STANDARDS_INDEX = {};
+
+function buildStandardsIndex(standards) {
+  const idx = {};
+  standards.forEach(row => {
+    const type = String(row.sample_type || '').trim().toLowerCase();
+    const param = String(row.parameter || '').trim().toLowerCase();
+    if (!type || !param) return;
+    idx[type + '.' + param] = {
+      min: row.min === '' || row.min == null ? null : Number(row.min),
+      max: row.max === '' || row.max == null ? null : Number(row.max),
+    };
+  });
+  return idx;
+}
+
+// Returns { status: 'good'|'critical'|'none', failedParams: [{label, value}] }
+function evaluateSample(type, row) {
+  const params = PARAM_CONFIG[type] || [];
+  let sawStandard = false;
+  const failed = [];
+  for (const p of params) {
+    const raw = row[p.key];
+    if (raw === '' || raw == null) continue;
+    const value = Number(raw);
+    if (Number.isNaN(value)) continue;
+    const std = STANDARDS_INDEX[type + '.' + p.key];
+    if (!std) continue;
+    sawStandard = true;
+    const tooLow = std.min != null && value < std.min;
+    const tooHigh = std.max != null && value > std.max;
+    if (tooLow || tooHigh) failed.push({ label: p.label, value });
+  }
+  if (!sawStandard) return { status: 'none', failedParams: [] };
+  return { status: failed.length ? 'critical' : 'good', failedParams: failed };
+}
+
+/* =========================================================================
+   STATE + RENDER
+   ========================================================================= */
+
+let DATA = { sites: [], soil: [], water: [], air: [], standards: [] };
+let ALL_SAMPLES = []; // flattened: {site, type, date, sampler, row, evalResult}
+let map, markerLayer;
+
+function driveThumb(url, size) {
+  if (!url) return null;
+  const m = String(url).match(/[-\w]{25,}/);
+  if (!m) return url;
+  return `https://drive.google.com/thumbnail?id=${m[0]}&sz=w${size || 400}`;
+}
+
+function flattenSamples() {
+  const sitesById = {};
+  DATA.sites.forEach(s => { sitesById[s.site_id] = s; });
+  const out = [];
+  ['soil', 'water', 'air'].forEach(type => {
+    (DATA[type] || []).forEach(row => {
+      const site = sitesById[row.site_id];
+      if (!site) return;
+      out.push({
+        type, site, date: row.date, sampler: row.sampler,
+        row, evalResult: evaluateSample(type, row),
+      });
+    });
+  });
+  out.sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  return out;
+}
+
+function siteStatus(site) {
+  const samples = ALL_SAMPLES.filter(s => s.site.site_id === site.site_id);
+  if (!samples.length) return 'none';
+  if (samples.some(s => s.evalResult.status === 'critical')) return 'critical';
+  if (samples.some(s => s.evalResult.status === 'good')) return 'good';
+  return 'none';
+}
+
+function statusColorHex(status) {
+  if (status === 'good') return '#0ca30c';
+  if (status === 'critical') return '#d03b3b';
+  return '#898781';
+}
+
+function initMap() {
+  map = L.map('map').setView([13.75, 100.52], 7);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19, attribution: '&copy; OpenStreetMap contributors',
+  }).addTo(map);
+  markerLayer = L.layerGroup().addTo(map);
+}
+
+function renderMap(filteredSamples) {
+  markerLayer.clearLayers();
+  const visibleSiteIds = new Set(filteredSamples.map(s => s.site.site_id));
+  const sitesToShow = DATA.sites.filter(s => visibleSiteIds.has(s.site_id) || filteredSamples.length === ALL_SAMPLES.length);
+  const bounds = [];
+  DATA.sites.forEach(site => {
+    if (!visibleSiteIds.has(site.site_id)) return;
+    const status = siteStatus(site);
+    const color = statusColorHex(status);
+    const marker = L.circleMarker([site.lat, site.lng], {
+      radius: 9, weight: 2, color: '#fff', fillColor: color, fillOpacity: 0.9,
+    }).addTo(markerLayer);
+    const samples = filteredSamples.filter(s => s.site.site_id === site.site_id);
+    const latest = samples[0];
+    let popup = `<b>${escapeHtml(site.name)}</b><br>
+      <span style="color:#666">${escapeHtml(site.site_id)} · ${TYPE_LABEL[site.type] || site.type}</span><br>
+      โครงการ: ${escapeHtml(site.project || '-')}<br>
+      จำนวนตัวอย่าง (ตามตัวกรอง): ${samples.length}`;
+    if (latest) {
+      popup += `<br>ล่าสุด: ${escapeHtml(latest.date)} — สถานะ: ${statusLabel(latest.evalResult.status)}`;
+    }
+    marker.bindPopup(popup);
+    bounds.push([site.lat, site.lng]);
+  });
+  if (bounds.length) map.fitBounds(bounds, { padding: [30, 30], maxZoom: 13 });
+}
+
+function statusLabel(status) {
+  if (status === 'good') return 'ผ่านมาตรฐาน';
+  if (status === 'critical') return 'เกินมาตรฐาน';
+  return 'ไม่มีมาตรฐานเทียบ';
+}
+
+function escapeHtml(str) {
+  return String(str ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function renderTable(filteredSamples) {
+  const tbody = document.getElementById('results-tbody');
+  if (!filteredSamples.length) {
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="6">ไม่พบข้อมูลตามตัวกรองที่เลือก</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = filteredSamples.map(s => {
+    const badgeClass = s.evalResult.status;
+    const failedText = s.evalResult.failedParams.length
+      ? s.evalResult.failedParams.map(f => `<span class="param-fail">${escapeHtml(f.label)} = ${f.value}</span>`).join(', ')
+      : '<span style="color:var(--text-muted)">–</span>';
+    const photo = s.row.photo_url ? driveThumb(s.row.photo_url, 200) : null;
+    const photoCell = photo
+      ? `<img class="thumb" src="${photo}" data-full="${driveThumb(s.row.photo_url, 1200)}" onclick="openPhoto(this.dataset.full)">`
+      : `<span class="no-photo">ไม่มีรูป</span>`;
+    return `<tr>
+      <td>${escapeHtml(s.site.name)}<br><span style="color:var(--text-muted);font-size:11px">${escapeHtml(s.site.site_id)}</span></td>
+      <td><span class="type-chip" style="background:${TYPE_COLOR_HEX[s.type]}">${TYPE_LABEL[s.type]}</span></td>
+      <td>${escapeHtml(s.date)}</td>
+      <td><span class="badge ${badgeClass}">${statusLabel(s.evalResult.status)}</span></td>
+      <td>${failedText}</td>
+      <td>${photoCell}</td>
+    </tr>`;
+  }).join('');
+}
+
+function openPhoto(url) {
+  document.getElementById('photo-modal-img').src = url;
+  document.getElementById('photo-modal').classList.add('show');
+}
+document.getElementById('photo-modal').addEventListener('click', () => {
+  document.getElementById('photo-modal').classList.remove('show');
+});
+
+function renderStats(filteredSamples) {
+  const siteIds = new Set(filteredSamples.map(s => s.site.site_id));
+  document.getElementById('stat-sites').textContent = siteIds.size;
+  document.getElementById('stat-samples').textContent = filteredSamples.length;
+  const evaluated = filteredSamples.filter(s => s.evalResult.status !== 'none');
+  const pass = evaluated.filter(s => s.evalResult.status === 'good').length;
+  const fail = evaluated.filter(s => s.evalResult.status === 'critical').length;
+  document.getElementById('stat-pass').textContent = evaluated.length ? `${pass} (${Math.round(pass/evaluated.length*100)}%)` : '–';
+  document.getElementById('stat-fail').textContent = fail;
+}
+
+function applyFilters() {
+  const type = document.getElementById('f-type').value;
+  const status = document.getElementById('f-status').value;
+  const from = document.getElementById('f-from').value;
+  const to = document.getElementById('f-to').value;
+  let filtered = ALL_SAMPLES.filter(s => {
+    if (type !== 'all' && s.type !== type) return false;
+    if (status !== 'all' && s.evalResult.status !== status) return false;
+    if (from && String(s.date) < from) return false;
+    if (to && String(s.date) > to) return false;
+    return true;
+  });
+  renderStats(filtered);
+  renderTable(filtered);
+  renderMap(filtered);
+}
+
+function renderAll() {
+  ALL_SAMPLES = flattenSamples();
+  applyFilters();
+}
+
+['f-type', 'f-status', 'f-from', 'f-to'].forEach(id => {
+  document.getElementById(id).addEventListener('change', applyFilters);
+});
+document.getElementById('f-reset').addEventListener('click', () => {
+  document.getElementById('f-type').value = 'all';
+  document.getElementById('f-status').value = 'all';
+  document.getElementById('f-from').value = '';
+  document.getElementById('f-to').value = '';
+  applyFilters();
+});
+
+/* =========================================================================
+   BOOT
+   ========================================================================= */
+
+async function boot(sheetId) {
+  if (sheetId) {
+    try {
+      hideBanner();
+      DATA = await loadFromSheet(sheetId);
+      localStorage.setItem('esd_sheet_id', sheetId);
+    } catch (err) {
+      console.error(err);
+      showBanner('โหลดจาก Google Sheets ไม่สำเร็จ (ตรวจสอบว่า Sheet ID ถูกต้อง และตั้งค่าแชร์เป็น "ทุกคนที่มีลิงก์ดูได้") — กำลังแสดงข้อมูลตัวอย่างแทน');
+      DATA = DEMO;
+    }
+  } else {
+    showBanner('ยังไม่ได้ตั้งค่า Google Sheet — กำลังแสดงข้อมูลตัวอย่าง (demo) เพื่อทดสอบ');
+    DATA = DEMO;
+  }
+  STANDARDS_INDEX = buildStandardsIndex(DATA.standards);
+  renderAll();
+}
+
+document.getElementById('load-btn').addEventListener('click', () => {
+  const id = document.getElementById('sheet-id-input').value.trim();
+  boot(id);
+});
+document.getElementById('demo-btn').addEventListener('click', () => {
+  document.getElementById('sheet-id-input').value = '';
+  localStorage.removeItem('esd_sheet_id');
+  boot('');
+});
+
+initMap();
+const savedId = localStorage.getItem('esd_sheet_id') || '';
+if (savedId) document.getElementById('sheet-id-input').value = savedId;
+boot(savedId);
+</script>
+</body>
+</html>
