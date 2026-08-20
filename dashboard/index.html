@@ -69,7 +69,7 @@
     padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border);
     background: var(--series-water); color: #fff; font-size: 12px; cursor: pointer; font-weight: 500;
   }
-  .sheet-config button.secondary { background: transparent; color: var(--text-secondary); }
+  .sheet-config button.secondary, .btn.secondary { background: transparent; color: var(--text-secondary); }
   #status-banner {
     display: none; padding: 8px 20px; font-size: 12px; background: #fff7e6; color: #6b4f00; border-bottom: 1px solid var(--border);
   }
@@ -133,6 +133,24 @@
     padding: 0 4px; border-radius: 3px; border: none !important; box-shadow: none !important;
   }
   .dist-label::before { display: none; }
+
+  #edit-hint {
+    font-size: 11.5px; color: var(--text-secondary); background: var(--surface-2);
+    padding: 6px 14px; border-bottom: 1px solid var(--border);
+  }
+  .site-edit-form { font-size: 12px; min-width: 220px; }
+  .site-edit-form .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
+  .site-edit-form .row label { color: var(--text-secondary); flex-shrink: 0; }
+  .site-edit-form .row input, .site-edit-form .row select {
+    flex: 1; min-width: 0; padding: 4px 6px; border-radius: 5px; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text-primary); font-size: 12px;
+  }
+  .site-edit-form .actions { justify-content: flex-end; margin-top: 8px; margin-bottom: 0; }
+  .site-edit-form .actions button {
+    padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; font-size: 12px; font-weight: 500;
+  }
+  .site-edit-form .f-save { background: var(--series-water); color: #fff; border: none; }
+  .site-edit-form .f-delete { background: transparent; color: var(--status-critical); }
 
   .layers-panel-body { padding: 12px 14px; display: flex; flex-direction: column; gap: 14px; }
   .layers-sub h3 { font-size: 12px; margin: 0 0 8px; font-weight: 600; color: var(--text-secondary); }
@@ -233,7 +251,14 @@
 
   <div class="layout">
     <div class="panel">
-      <h2>แผนที่จุดเก็บตัวอย่าง <button class="btn" id="export-map-btn" type="button" style="font-weight:400">ส่งออกเป็นรูปภาพ</button></h2>
+      <h2>แผนที่จุดเก็บตัวอย่าง
+        <span style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn" id="edit-mode-btn" type="button" style="font-weight:400">โหมดแก้ไขหมุด: ปิด</button>
+          <button class="btn secondary" id="export-sites-btn" type="button" style="font-weight:400">ส่งออก Sites.csv</button>
+          <button class="btn" id="export-map-btn" type="button" style="font-weight:400">ส่งออกเป็นรูปภาพ</button>
+        </span>
+      </h2>
+      <div id="edit-hint" style="display:none">โหมดแก้ไข: ลากหมุดเพื่อย้ายตำแหน่ง · คลิกหมุดเพื่อแก้ไข/ลบ · คลิกพื้นที่ว่างบนแผนที่เพื่อเพิ่มจุดใหม่ — การแก้ไขจะอยู่ในหน้านี้เท่านั้น กด "ส่งออก Sites.csv" เพื่อนำไปอัปเดตใน Google Sheet เอง</div>
       <div id="map"></div>
       <div class="legend">
         <span><span class="dot" style="background:var(--status-good)"></span>ผ่านมาตรฐาน</span>
@@ -584,13 +609,39 @@ function initMap() {
     null, { position: 'topright' }
   ).addTo(map);
   markerLayer = L.layerGroup().addTo(map);
+  map.on('click', (e) => {
+    if (!EDIT_MODE) return;
+    L.popup().setLatLng(e.latlng).setContent(buildSiteForm(null, true, e.latlng)).openOn(map);
+  });
 }
 
+function siteDivIcon(color) {
+  return L.divIcon({
+    className: '', iconSize: [18, 18], iconAnchor: [9, 9],
+    html: `<div style="width:14px;height:14px;border-radius:50%;background:${color};border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.3)"></div>`,
+  });
+}
 const SOURCE_ICON = L.divIcon({
   className: '', html: '<div class="source-marker-inner"></div>', iconSize: [16, 16], iconAnchor: [8, 8],
 });
 
-function renderMap(filteredSamples) {
+function attachEditBehavior(marker, site) {
+  if (marker.getElement()) marker.getElement().dataset.siteId = site.site_id;
+  marker.options.draggable = EDIT_MODE;
+  if (marker.dragging) EDIT_MODE ? marker.dragging.enable() : marker.dragging.disable();
+  if (!EDIT_MODE) return;
+  marker.on('dragend', () => {
+    const { lat, lng } = marker.getLatLng();
+    site.lat = lat; site.lng = lng;
+    SITES_EDITED = true;
+    renderAll();
+  });
+  marker.on('click', () => {
+    L.popup().setLatLng(marker.getLatLng()).setContent(buildSiteForm(site, false)).openOn(map);
+  });
+}
+
+function renderMap(filteredSamples, fit = true) {
   markerLayer.clearLayers();
   const visibleSiteIds = new Set(filteredSamples.map(s => s.site.site_id));
   const bounds = [];
@@ -600,32 +651,39 @@ function renderMap(filteredSamples) {
   DATA.sites.filter(s => s.type === 'source').forEach(site => {
     const marker = L.marker([site.lat, site.lng], { icon: SOURCE_ICON }).addTo(markerLayer);
     marker.bindTooltip(escapeHtml(site.site_id), { permanent: true, direction: 'top', offset: [0, -8], className: 'site-label' });
-    marker.bindPopup(`<b>${escapeHtml(site.name)}</b><br><span style="color:#666">${escapeHtml(site.site_id)} · แหล่งกำเนิด/จุดอ้างอิง</span><br>โครงการ: ${escapeHtml(site.project || '-')}`);
+    if (EDIT_MODE) {
+      attachEditBehavior(marker, site);
+    } else {
+      marker.bindPopup(`<b>${escapeHtml(site.name)}</b><br><span style="color:#666">${escapeHtml(site.site_id)} · แหล่งกำเนิด/จุดอ้างอิง</span><br>โครงการ: ${escapeHtml(site.project || '-')}`);
+    }
     bounds.push([site.lat, site.lng]);
   });
 
   DATA.sites.filter(s => s.type !== 'source').forEach(site => {
-    if (!visibleSiteIds.has(site.site_id)) return;
+    if (!EDIT_MODE && !visibleSiteIds.has(site.site_id)) return;
     const status = siteStatus(site);
     const color = statusColorHex(status);
-    const marker = L.circleMarker([site.lat, site.lng], {
-      radius: 9, weight: 2, color: '#fff', fillColor: color, fillOpacity: 0.9,
-    }).addTo(markerLayer);
+    const marker = L.marker([site.lat, site.lng], { icon: siteDivIcon(color) }).addTo(markerLayer);
     marker.bindTooltip(escapeHtml(site.site_id), { permanent: true, direction: 'top', offset: [0, -8], className: 'site-label' });
     const samples = filteredSamples.filter(s => s.site.site_id === site.site_id);
     const latest = samples[0];
     const nearest = nearestSource(site);
-    let popup = `<b>${escapeHtml(site.name)}</b><br>
-      <span style="color:#666">${escapeHtml(site.site_id)} · ${TYPE_LABEL[site.type] || site.type}</span><br>
-      โครงการ: ${escapeHtml(site.project || '-')}<br>
-      จำนวนตัวอย่าง (ตามตัวกรอง): ${samples.length}`;
-    if (latest) {
-      popup += `<br>ล่าสุด: ${escapeHtml(latest.date)} — สถานะ: ${statusLabel(latest.evalResult.status)}`;
+
+    if (EDIT_MODE) {
+      attachEditBehavior(marker, site);
+    } else {
+      let popup = `<b>${escapeHtml(site.name)}</b><br>
+        <span style="color:#666">${escapeHtml(site.site_id)} · ${TYPE_LABEL[site.type] || site.type}</span><br>
+        โครงการ: ${escapeHtml(site.project || '-')}<br>
+        จำนวนตัวอย่าง (ตามตัวกรอง): ${samples.length}`;
+      if (latest) {
+        popup += `<br>ล่าสุด: ${escapeHtml(latest.date)} — สถานะ: ${statusLabel(latest.evalResult.status)}`;
+      }
+      if (nearest) {
+        popup += `<br>ระยะจาก ${escapeHtml(nearest.source.site_id)}: ${formatDistanceKm(nearest.distanceKm)}`;
+      }
+      marker.bindPopup(popup);
     }
-    if (nearest) {
-      popup += `<br>ระยะจาก ${escapeHtml(nearest.source.site_id)}: ${formatDistanceKm(nearest.distanceKm)}`;
-    }
-    marker.bindPopup(popup);
     bounds.push([site.lat, site.lng]);
 
     if (showDist && nearest) {
@@ -638,7 +696,7 @@ function renderMap(filteredSamples) {
     }
   });
 
-  if (bounds.length) map.fitBounds(bounds, { padding: [30, 30], maxZoom: 13 });
+  if (fit && bounds.length) map.fitBounds(bounds, { padding: [30, 30], maxZoom: 13 });
 }
 
 function statusLabel(status) {
@@ -701,7 +759,7 @@ function renderStats(filteredSamples) {
   document.getElementById('stat-fail').textContent = fail;
 }
 
-function applyFilters() {
+function applyFilters(fit = true) {
   const type = document.getElementById('f-type').value;
   const status = document.getElementById('f-status').value;
   const from = document.getElementById('f-from').value;
@@ -715,18 +773,21 @@ function applyFilters() {
   });
   renderStats(filtered);
   renderTable(filtered);
-  renderMap(filtered);
+  renderMap(filtered, fit);
 }
 
-function renderAll() {
+function renderAll(fit = true) {
   ALL_SAMPLES = flattenSamples();
-  applyFilters();
+  applyFilters(fit);
 }
 
-['f-type', 'f-status', 'f-from', 'f-to', 'f-show-dist', 'dist-color', 'dist-decimals'].forEach(id => {
-  document.getElementById(id).addEventListener('change', applyFilters);
+['f-type', 'f-status', 'f-from', 'f-to'].forEach(id => {
+  document.getElementById(id).addEventListener('change', () => applyFilters(true));
 });
-document.getElementById('dist-opacity').addEventListener('input', applyFilters);
+['f-show-dist', 'dist-color', 'dist-decimals'].forEach(id => {
+  document.getElementById(id).addEventListener('change', () => applyFilters(false));
+});
+document.getElementById('dist-opacity').addEventListener('input', () => applyFilters(false));
 document.getElementById('f-reset').addEventListener('click', () => {
   document.getElementById('f-type').value = 'all';
   document.getElementById('f-status').value = 'all';
@@ -939,6 +1000,106 @@ document.getElementById('kml-import-btn').addEventListener('click', async () => 
   if (featureBounds.length) map.fitBounds(featureBounds, { padding: [30, 30] });
   fileInput.value = '';
   if (skipped > 0) alert(`นำเข้าสำเร็จ ${imported} รายการ, ข้าม ${skipped} รายการ (มักเป็น Ground Overlay ที่หารูปภาพอ้างอิงไม่พบ — ใช้ไฟล์ .kmz แทน .kml จะช่วยได้)`);
+});
+
+/* =========================================================================
+   EDIT SITES — drag/add/edit/delete pins, local-only, export as CSV
+   ========================================================================= */
+
+let EDIT_MODE = false;
+let SITES_EDITED = false;
+
+function refreshExportSitesLabel() {
+  document.getElementById('export-sites-btn').textContent =
+    SITES_EDITED ? 'ส่งออก Sites.csv (มีการแก้ไข)' : 'ส่งออก Sites.csv';
+}
+
+function buildSiteForm(site, isNew, latlng) {
+  const wrap = document.createElement('div');
+  wrap.className = 'site-edit-form';
+  const lat = site ? site.lat : latlng.lat;
+  const lng = site ? site.lng : latlng.lng;
+  wrap.innerHTML = `
+    <div class="row"><label>รหัสจุด</label><input type="text" class="f-id" value="${escapeHtml(site ? site.site_id : '')}" ${isNew ? '' : 'readonly'}></div>
+    <div class="row"><label>ชื่อจุด</label><input type="text" class="f-name" value="${escapeHtml(site ? site.name : '')}"></div>
+    <div class="row"><label>ประเภท</label>
+      <select class="f-type">
+        ${['water', 'soil', 'air', 'source'].map(t => `<option value="${t}" ${site && site.type === t ? 'selected' : ''}>${TYPE_LABEL[t]}</option>`).join('')}
+      </select>
+    </div>
+    <div class="row"><label>โครงการ</label><input type="text" class="f-project" value="${escapeHtml(site ? site.project : '')}"></div>
+    <div class="row"><label>Lat</label><input type="number" step="any" class="f-lat" value="${lat}"></div>
+    <div class="row"><label>Lng</label><input type="number" step="any" class="f-lng" value="${lng}"></div>
+    <div class="row actions">
+      <button type="button" class="btn f-save">${isNew ? 'เพิ่มจุด' : 'บันทึก'}</button>
+      ${isNew ? '' : '<button type="button" class="btn f-delete">ลบจุดนี้</button>'}
+    </div>
+  `;
+  wrap.querySelector('.f-save').addEventListener('click', () => {
+    const id = wrap.querySelector('.f-id').value.trim();
+    const name = wrap.querySelector('.f-name').value.trim();
+    const type = wrap.querySelector('.f-type').value;
+    const project = wrap.querySelector('.f-project').value.trim();
+    const newLat = parseFloat(wrap.querySelector('.f-lat').value);
+    const newLng = parseFloat(wrap.querySelector('.f-lng').value);
+    if (!id || !name || Number.isNaN(newLat) || Number.isNaN(newLng)) {
+      alert('กรอกรหัสจุด ชื่อ และพิกัดให้ครบ'); return;
+    }
+    if (isNew) {
+      if (DATA.sites.some(s => s.site_id === id)) { alert('รหัสจุดนี้มีอยู่แล้ว ใช้รหัสอื่น'); return; }
+      DATA.sites.push({ site_id: id, name, type, lat: newLat, lng: newLng, project });
+    } else {
+      Object.assign(site, { name, type, project, lat: newLat, lng: newLng });
+    }
+    SITES_EDITED = true;
+    refreshExportSitesLabel();
+    map.closePopup();
+    renderAll(false);
+  });
+  if (!isNew) {
+    wrap.querySelector('.f-delete').addEventListener('click', () => {
+      if (!confirm(`ลบจุด ${site.site_id} ออกจากแผนที่?\n(จะไม่ลบผลตรวจที่เชื่อมกับจุดนี้ในชีท Google Sheets — ลบเฉพาะในหน้านี้เท่านั้น)`)) return;
+      DATA.sites = DATA.sites.filter(s => s.site_id !== site.site_id);
+      SITES_EDITED = true;
+      refreshExportSitesLabel();
+      map.closePopup();
+      renderAll(false);
+    });
+  }
+  return wrap;
+}
+
+function sitesToCsv(sites) {
+  const headers = ['site_id', 'name', 'type', 'lat', 'lng', 'project'];
+  const escapeCsv = v => {
+    const s = String(v ?? '');
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const lines = [headers.join(',')];
+  sites.forEach(s => lines.push(headers.map(h => escapeCsv(s[h])).join(',')));
+  return lines.join('\r\n');
+}
+
+document.getElementById('edit-mode-btn').addEventListener('click', () => {
+  EDIT_MODE = !EDIT_MODE;
+  const btn = document.getElementById('edit-mode-btn');
+  btn.textContent = EDIT_MODE ? 'โหมดแก้ไขหมุด: เปิด' : 'โหมดแก้ไขหมุด: ปิด';
+  btn.style.background = EDIT_MODE ? 'var(--status-critical)' : '';
+  document.getElementById('edit-hint').style.display = EDIT_MODE ? 'block' : 'none';
+  map.getContainer().style.cursor = EDIT_MODE ? 'crosshair' : '';
+  applyFilters(false);
+});
+
+document.getElementById('export-sites-btn').addEventListener('click', () => {
+  const csv = sitesToCsv(DATA.sites);
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  const stamp = new Date().toISOString().slice(0, 10);
+  link.download = `Sites-edited-${stamp}.csv`;
+  link.href = url;
+  link.click();
+  URL.revokeObjectURL(url);
 });
 
 /* =========================================================================
