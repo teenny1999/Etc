@@ -1047,8 +1047,63 @@ document.getElementById('f-reset').addEventListener('click', () => {
    MAP LAYERS — custom image overlays + KML/KMZ import
    ========================================================================= */
 
-let CUSTOM_LAYERS = []; // {id, name, kind:'image'|'feature', leafletLayer, bounds}
+let CUSTOM_LAYERS = []; // {id, name, kind:'image'|'feature', leafletLayer, bounds, persistPayload}
 let customLayerSeq = 0;
+
+// --- persistence (localStorage) --------------------------------------
+// Image URLs here are always either data: URLs or absolute http(s) URLs
+// (never blob: object URLs, which die on reload) — see blobToDataUrl below
+// — so a layer's persistPayload can be written to storage as-is.
+const CUSTOM_LAYERS_STORAGE_KEY = 'esd_custom_layers_v1';
+
+function saveCustomLayersToStorage() {
+  try {
+    const payload = CUSTOM_LAYERS.map(e => e.persistPayload).filter(Boolean);
+    localStorage.setItem(CUSTOM_LAYERS_STORAGE_KEY, JSON.stringify(payload));
+  } catch (err) {
+    console.error(err);
+    alert('บันทึกชั้นข้อมูลแผนที่ไม่สำเร็จ (พื้นที่จัดเก็บของเบราว์เซอร์เต็ม — มักเกิดจากไฟล์ภาพใหญ่เกินไป) ใช้งานได้ในหน้านี้ต่อไป แต่จะหายเมื่อโหลดหน้าใหม่');
+  }
+}
+
+async function restoreCustomLayersFromStorage() {
+  let stored;
+  try {
+    stored = JSON.parse(localStorage.getItem(CUSTOM_LAYERS_STORAGE_KEY) || '[]');
+  } catch (err) {
+    console.error(err);
+    return;
+  }
+  for (const entry of stored) {
+    if (entry.kind === 'image') {
+      addImageOverlayLayer(entry.name, entry.imageUrl, entry.bounds, { fit: false, opacity: entry.opacity });
+    } else if (entry.kind === 'feature') {
+      const group = L.layerGroup().addTo(map);
+      // GroundOverlay images from this KML were already restored as their
+      // own separate 'image' entries above — resolveHref returns null here
+      // so parseKmlDocument only rebuilds the Placemark features.
+      const { imported, featureBounds } = await parseKmlDocument(entry.kmlText, async () => null, group);
+      if (imported > 0) {
+        CUSTOM_LAYERS.push({
+          id: ++customLayerSeq, name: entry.name, kind: 'feature', leafletLayer: group,
+          bounds: featureBounds.length ? featureBounds : null, persistPayload: entry,
+        });
+      } else {
+        map.removeLayer(group);
+      }
+    }
+  }
+  renderLayerList();
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
 
 function renderLayerList() {
   const ul = document.getElementById('layer-list');
@@ -1084,6 +1139,10 @@ function renderLayerList() {
       opacityInput.min = '0.1'; opacityInput.max = '1'; opacityInput.step = '0.05';
       opacityInput.value = String(entry.leafletLayer.options.opacity ?? 0.85);
       opacityInput.addEventListener('input', () => entry.leafletLayer.setOpacity(Number(opacityInput.value)));
+      opacityInput.addEventListener('change', () => {
+        if (entry.persistPayload) entry.persistPayload.opacity = Number(opacityInput.value);
+        saveCustomLayersToStorage();
+      });
       li.appendChild(opacityInput);
     }
 
@@ -1094,6 +1153,7 @@ function renderLayerList() {
       map.removeLayer(entry.leafletLayer);
       CUSTOM_LAYERS = CUSTOM_LAYERS.filter(e => e.id !== entry.id);
       renderLayerList();
+      saveCustomLayersToStorage();
     });
     li.appendChild(removeBtn);
 
@@ -1101,11 +1161,16 @@ function renderLayerList() {
   });
 }
 
-function addImageOverlayLayer(name, imageUrl, bounds) {
-  const layer = L.imageOverlay(imageUrl, bounds, { opacity: 0.85 }).addTo(map);
-  CUSTOM_LAYERS.push({ id: ++customLayerSeq, name, kind: 'image', leafletLayer: layer, bounds });
+function addImageOverlayLayer(name, imageUrl, bounds, opts = {}) {
+  const { fit = true, opacity = 0.85 } = opts;
+  const layer = L.imageOverlay(imageUrl, bounds, { opacity }).addTo(map);
+  CUSTOM_LAYERS.push({
+    id: ++customLayerSeq, name, kind: 'image', leafletLayer: layer, bounds,
+    persistPayload: { kind: 'image', name, imageUrl, bounds, opacity },
+  });
   renderLayerList();
-  map.fitBounds(bounds, { padding: [30, 30] });
+  if (fit) map.fitBounds(bounds, { padding: [30, 30] });
+  saveCustomLayersToStorage();
 }
 
 document.getElementById('overlay-add-btn').addEventListener('click', () => {
@@ -1194,7 +1259,11 @@ async function parseKmlDocument(xmlText, resolveHref, group) {
       ne = [Math.max(...lats), Math.max(...lngs)];
     }
     const layer = L.imageOverlay(url, [sw, ne], { opacity: 0.85 }).addTo(group);
-    CUSTOM_LAYERS.push({ id: ++customLayerSeq, name: `[KML] ${name}`, kind: 'image', leafletLayer: layer, bounds: [sw, ne] });
+    const goName = `[KML] ${name}`;
+    CUSTOM_LAYERS.push({
+      id: ++customLayerSeq, name: goName, kind: 'image', leafletLayer: layer, bounds: [sw, ne],
+      persistPayload: { kind: 'image', name: goName, imageUrl: url, bounds: [sw, ne], opacity: 0.85 },
+    });
     featureBounds.push(sw, ne);
     imported++;
   }
@@ -1209,23 +1278,24 @@ document.getElementById('kml-import-btn').addEventListener('click', async () => 
 
   const group = L.layerGroup().addTo(map);
   let imported = 0, skipped = 0, featureBounds = [];
+  let kmlText = '';
 
   try {
     if (/\.kmz$/i.test(file.name)) {
       const zip = await JSZip.loadAsync(file);
       const kmlEntry = Object.values(zip.files).find(f => /\.kml$/i.test(f.name));
       if (!kmlEntry) throw new Error('ไม่พบไฟล์ .kml ภายใน .kmz');
-      const kmlText = await kmlEntry.async('text');
+      kmlText = await kmlEntry.async('text');
       const resolveHref = async (href) => {
         const norm = href.replace(/^\.?\//, '');
         const entry = zip.file(norm) || zip.file(href) || Object.values(zip.files).find(f => f.name.endsWith(href));
         if (!entry) return null;
         const blob = await entry.async('blob');
-        return URL.createObjectURL(blob);
+        return blobToDataUrl(blob); // data: URL, not blob: — so it survives being saved to localStorage
       };
       ({ imported, skipped, featureBounds } = await parseKmlDocument(kmlText, resolveHref, group));
     } else {
-      const kmlText = await file.text();
+      kmlText = await file.text();
       const resolveHref = async (href) => (/^https?:\/\//i.test(href) ? href : null);
       ({ imported, skipped, featureBounds } = await parseKmlDocument(kmlText, resolveHref, group));
     }
@@ -1242,10 +1312,16 @@ document.getElementById('kml-import-btn').addEventListener('click', async () => 
     return;
   }
 
-  CUSTOM_LAYERS.push({ id: ++customLayerSeq, name: `[KML] ${file.name} (${imported} รายการ)`, kind: 'feature', leafletLayer: group, bounds: featureBounds.length ? featureBounds : null });
+  const featureName = `[KML] ${file.name} (${imported} รายการ)`;
+  CUSTOM_LAYERS.push({
+    id: ++customLayerSeq, name: featureName, kind: 'feature', leafletLayer: group,
+    bounds: featureBounds.length ? featureBounds : null,
+    persistPayload: { kind: 'feature', name: featureName, kmlText },
+  });
   renderLayerList();
   if (featureBounds.length) map.fitBounds(featureBounds, { padding: [30, 30] });
   fileInput.value = '';
+  saveCustomLayersToStorage();
   if (skipped > 0) alert(`นำเข้าสำเร็จ ${imported} รายการ, ข้าม ${skipped} รายการ (มักเป็น Ground Overlay ที่หารูปภาพอ้างอิงไม่พบ — ใช้ไฟล์ .kmz แทน .kml จะช่วยได้)`);
 });
 
@@ -1486,6 +1562,7 @@ document.getElementById('theme-toggle-btn').addEventListener('click', () => {
 syncThemeButtonLabel();
 
 initMap();
+restoreCustomLayersFromStorage();
 const savedId = localStorage.getItem('esd_sheet_id') || '';
 if (savedId) document.getElementById('sheet-id-input').value = savedId;
 boot(savedId);
