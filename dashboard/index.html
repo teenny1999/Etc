@@ -134,6 +134,33 @@
   .filters .spacer { flex: 1; }
   .filters .reset { font-size: 12px; color: var(--series-water); cursor: pointer; background: none; border: none; }
 
+  .print-bar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 12px; margin-bottom: 14px;
+  }
+  .print-bar input[type=text] {
+    padding: 6px 8px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text-primary); font-size: 12px; width: 280px;
+  }
+  .print-bar-hint { font-size: 11px; color: var(--text-muted); }
+
+  #print-report { display: none; }
+  #print-report h1 { font-size: 20px; margin: 0 0 4px; }
+  #print-report .meta { font-size: 12px; color: #555; margin-bottom: 14px; }
+  #print-report .print-map-img { max-width: 100%; border: 1px solid #ccc; margin-bottom: 16px; }
+  #print-report h2 { font-size: 15px; margin: 20px 0 8px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+  #print-report table { border-collapse: collapse; width: 100%; font-size: 11px; }
+  #print-report .photo-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  #print-report .photo-card { font-size: 10px; text-align: center; }
+  #print-report .photo-card img { width: 100%; height: 110px; object-fit: cover; border: 1px solid #ccc; }
+  @media print {
+    body * { visibility: hidden; }
+    #print-report, #print-report * { visibility: visible; }
+    #print-report { display: block; position: absolute; top: 0; left: 0; width: 100%; color: #000; background: #fff; }
+    #print-report .photo-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+
   .layout { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; }
   @media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
 
@@ -316,6 +343,12 @@
     <button class="reset" id="f-reset">ล้างตัวกรอง</button>
   </div>
 
+  <div class="print-bar">
+    <input type="text" id="report-title" placeholder="หัวเรื่องรายงาน (เว้นว่าง = ใช้ค่าเริ่มต้น)">
+    <button class="btn" id="print-report-btn" type="button">🖨️ พิมพ์รายงาน / บันทึกเป็น PDF</button>
+    <span class="print-bar-hint">สร้างรายงานจากข้อมูลตามตัวกรองด้านบน (แผนที่ + ตารางสรุป + รูปถ่าย) แล้วเปิดหน้าต่างพิมพ์ของเบราว์เซอร์ — เลือก "บันทึกเป็น PDF" ในหน้าต่างพิมพ์เพื่อได้ไฟล์ PDF</span>
+  </div>
+
   <div class="layout">
     <div class="panel">
       <h2>แผนที่จุดเก็บตัวอย่าง
@@ -417,6 +450,7 @@
 <footer>Environmental Sample Dashboard — v0.1 alpha · ข้อมูลมาตรฐานเป็นตัวอย่างเท่านั้น ต้องตรวจสอบกับประกาศกฎหมายจริงก่อนใช้รายงาน</footer>
 
 <div id="photo-modal"><img id="photo-modal-img" src="" alt=""></div>
+<div id="print-report"></div>
 <datalist id="province-datalist"></datalist>
 <datalist id="case-type-datalist"></datalist>
 <datalist id="standard-set-datalist"></datalist>
@@ -1607,12 +1641,10 @@ document.getElementById('export-sites-btn').addEventListener('click', () => {
    EXPORT MAP AS IMAGE
    ========================================================================= */
 
-document.getElementById('export-map-btn').addEventListener('click', async () => {
-  const btn = document.getElementById('export-map-btn');
+// Shared by the PNG-download button and the print-report builder below.
+// Returns a data: URL of the current map view, or null if capture fails.
+async function captureMapAsDataUrl() {
   const controls = document.querySelector('#map .leaflet-control-container');
-  const originalText = btn.textContent;
-  btn.textContent = 'กำลังส่งออก...';
-  btn.disabled = true;
   if (controls) controls.style.display = 'none';
   try {
     const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 20000));
@@ -1620,19 +1652,103 @@ document.getElementById('export-map-btn').addEventListener('click', async () => 
       html2canvas(document.getElementById('map'), { useCORS: true, allowTaint: false }),
       timeout,
     ]);
+    return canvas.toDataURL('image/png');
+  } catch (err) {
+    console.error(err);
+    return null;
+  } finally {
+    if (controls) controls.style.display = '';
+  }
+}
+
+document.getElementById('export-map-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('export-map-btn');
+  const originalText = btn.textContent;
+  btn.textContent = 'กำลังส่งออก...';
+  btn.disabled = true;
+  const dataUrl = await captureMapAsDataUrl();
+  if (dataUrl) {
     const link = document.createElement('a');
     const stamp = new Date().toISOString().slice(0, 10);
     link.download = `environmental-map-${stamp}.png`;
-    link.href = canvas.toDataURL('image/png');
+    link.href = dataUrl;
     link.click();
-  } catch (err) {
-    console.error(err);
+  } else {
     alert('ส่งออกรูปภาพไม่สำเร็จ (หรือใช้เวลานานเกินไป) มักเกิดจากพื้นหลังแผนที่ (เช่น OpenStreetMap) ไม่อนุญาตให้ดึงภาพข้ามโดเมน (CORS) หรือโหลดไทล์ไม่ครบ — ลองสลับไปใช้พื้นหลัง "ภาพถ่ายดาวเทียม (Esri)" แล้วลองใหม่ หรือใช้การพิมพ์หน้าจอ/สกรีนช็อตแทน');
-  } finally {
-    if (controls) controls.style.display = '';
-    btn.textContent = originalText;
-    btn.disabled = false;
   }
+  btn.textContent = originalText;
+  btn.disabled = false;
+});
+
+/* =========================================================================
+   PRINT REPORT — title + map + summary table + photo grid, via window.print()
+   ========================================================================= */
+
+function buildFilterSummaryText() {
+  const type = document.getElementById('f-type').value;
+  const status = document.getElementById('f-status').value;
+  const from = document.getElementById('f-from').value;
+  const to = document.getElementById('f-to').value;
+  const province = document.getElementById('f-province').value;
+  const caseType = document.getElementById('f-case-type').value;
+  const parts = [
+    `ประเภท: ${type === 'all' ? 'ทั้งหมด' : TYPE_LABEL[type]}`,
+    `สถานะ: ${status === 'all' ? 'ทั้งหมด' : statusLabel(status)}`,
+  ];
+  if (province !== 'all') parts.push(`จังหวัด: ${province}`);
+  if (caseType !== 'all') parts.push(`กรณี: ${caseType}`);
+  if (from || to) parts.push(`ช่วงวันที่: ${from || '…'} ถึง ${to || '…'}`);
+  return parts.join(' · ');
+}
+
+function buildPhotoGridHtml(samples) {
+  const withPhotos = samples.filter(s => s.row.photo_url);
+  if (!withPhotos.length) return '';
+  const cards = withPhotos.map(s => {
+    const thumb = driveThumb(s.row.photo_url, 400);
+    return `<div class="photo-card"><img src="${thumb}" alt=""><div>${escapeHtml(s.site.site_id)} · ${escapeHtml(s.date)}</div></div>`;
+  }).join('');
+  return `<h2>รูปถ่ายประกอบ</h2><div class="photo-grid">${cards}</div>`;
+}
+
+document.getElementById('print-report-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('print-report-btn');
+  const originalText = btn.textContent;
+  btn.textContent = 'กำลังสร้างรายงาน...';
+  btn.disabled = true;
+
+  const mapDataUrl = await captureMapAsDataUrl();
+  const title = document.getElementById('report-title').value.trim() || 'รายงานผลการติดตามตรวจสอบคุณภาพสิ่งแวดล้อม';
+  const dateStr = new Date().toLocaleDateString('th-TH', { year: 'numeric', month: 'long', day: 'numeric' });
+  const stats = {
+    sites: document.getElementById('stat-sites').textContent,
+    samples: document.getElementById('stat-samples').textContent,
+    pass: document.getElementById('stat-pass').textContent,
+    fail: document.getElementById('stat-fail').textContent,
+  };
+  const mapHtml = mapDataUrl
+    ? `<img class="print-map-img" src="${mapDataUrl}" alt="แผนที่">`
+    : `<p style="color:#900;font-size:12px">(ไม่สามารถแนบภาพแผนที่ได้ในครั้งนี้ — ลองสลับไปใช้พื้นหลังภาพถ่ายดาวเทียมแล้วลองใหม่)</p>`;
+
+  document.getElementById('print-report').innerHTML = `
+    <h1>${escapeHtml(title)}</h1>
+    <div class="meta">
+      วันที่พิมพ์: ${escapeHtml(dateStr)} ·
+      จุดที่แสดง: ${escapeHtml(stats.sites)} · ตัวอย่าง: ${escapeHtml(stats.samples)} ·
+      ผ่านมาตรฐาน: ${escapeHtml(stats.pass)} · เกินมาตรฐาน: ${escapeHtml(stats.fail)}<br>
+      ตัวกรองที่ใช้: ${escapeHtml(buildFilterSummaryText())}
+    </div>
+    <h2>แผนที่จุดเก็บตัวอย่าง</h2>
+    ${mapHtml}
+    <h2>ตารางผลตรวจ</h2>
+    ${resultsTableToHtml(CURRENT_FILTERED)}
+    ${buildPhotoGridHtml(CURRENT_FILTERED)}
+    <p style="font-size:10px;color:#777;margin-top:16px">ข้อมูลมาตรฐานเป็นตัวอย่างเท่านั้น ต้องตรวจสอบกับประกาศกฎหมายจริงก่อนใช้รายงานฉบับจริง</p>
+  `;
+
+  btn.textContent = originalText;
+  btn.disabled = false;
+  window.print();
 });
 
 /* =========================================================================
