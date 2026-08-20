@@ -210,6 +210,22 @@
   .layer-list li button { border: none; background: none; color: var(--status-critical); cursor: pointer; font-size: 12px; }
   .layers-note { font-size: 11px; color: var(--text-muted); }
 
+  .trend-body { padding: 12px 14px; }
+  .trend-param-label { font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .trend-param-label select {
+    padding: 5px 8px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--surface-2); color: var(--text-primary); font-size: 12px;
+  }
+  #trend-chart-wrap { overflow-x: auto; }
+  #trend-chart-wrap .trend-empty { color: var(--text-muted); font-size: 12px; padding: 30px 0; text-align: center; }
+  .trend-legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 11px; color: var(--text-secondary); padding: 6px 4px 0; }
+  .trend-legend .item { display: flex; align-items: center; gap: 5px; }
+  .trend-legend .swatch { width: 10px; height: 2px; border-radius: 1px; display: inline-block; }
+  .trend-axis-label { font-size: 10px; fill: var(--text-muted); }
+  .trend-gridline { stroke: var(--gridline); stroke-width: 1; }
+  .trend-threshold { stroke: var(--status-critical); stroke-width: 1.5; stroke-dasharray: 4,3; }
+  .trend-threshold-label { font-size: 10px; fill: var(--status-critical); }
+
   .table-wrap { max-height: 480px; overflow: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
   thead th {
@@ -384,6 +400,16 @@
         <h3>ชั้นข้อมูลที่เพิ่มแล้ว</h3>
         <ul class="layer-list" id="layer-list"><li style="color:var(--text-muted)">— ยังไม่มี —</li></ul>
       </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>กราฟแนวโน้มค่าตามเวลา <span class="hint">ใช้ข้อมูลตามตัวกรองด้านบน</span></h2>
+    <div class="trend-body">
+      <label class="trend-param-label">พารามิเตอร์
+        <select id="trend-param"><option value="">— เลือกพารามิเตอร์ —</option></select>
+      </label>
+      <div id="trend-chart-wrap"></div>
     </div>
   </div>
 </main>
@@ -999,6 +1025,149 @@ function populateDynamicFilters() {
   document.getElementById('standard-set-datalist').innerHTML = setValues.map(v => `<option value="${escapeHtml(v)}">`).join('');
 }
 
+/* =========================================================================
+   TREND CHART — value over time, one line per site, for a chosen parameter
+   ========================================================================= */
+
+const TREND_COLORS_LIGHT = ['#2a78d6', '#eb6834', '#1baf7a', '#eda100', '#e87ba4', '#008300', '#4a3aa7', '#e34948'];
+const TREND_COLORS_DARK = ['#3987e5', '#d95926', '#199e70', '#c98500', '#d55181', '#008300', '#9085e9', '#e66767'];
+const TREND_MAX_SERIES = 8;
+
+function populateTrendParamSelect() {
+  const select = document.getElementById('trend-param');
+  const options = [];
+  ['water', 'soil', 'air'].forEach(type => {
+    PARAM_CONFIG[type].forEach(p => {
+      options.push(`<option value="${type}::${p.key}">${TYPE_LABEL[type]} · ${escapeHtml(p.label)}</option>`);
+    });
+  });
+  select.innerHTML = '<option value="">— เลือกพารามิเตอร์ —</option>' + options.join('');
+}
+document.getElementById('trend-param').addEventListener('change', () => renderTrendChart());
+
+function parseDateLocal(dateStr) {
+  const [y, m, d] = String(dateStr).split('-').map(Number);
+  return new Date(y, (m || 1) - 1, d || 1);
+}
+function formatDateShort(date) {
+  const pad = n => String(n).padStart(2, '0');
+  return `${pad(date.getDate())}/${pad(date.getMonth() + 1)}/${String(date.getFullYear()).slice(2)}`;
+}
+
+function renderTrendChart() {
+  const wrap = document.getElementById('trend-chart-wrap');
+  const paramValue = document.getElementById('trend-param').value;
+  if (!paramValue) {
+    wrap.innerHTML = '<div class="trend-empty">เลือกพารามิเตอร์ด้านบนเพื่อดูกราฟแนวโน้ม (ใช้ข้อมูลตามตัวกรองปัจจุบัน)</div>';
+    return;
+  }
+  const [type, key] = paramValue.split('::');
+  const paramDef = (PARAM_CONFIG[type] || []).find(p => p.key === key);
+  const samples = (CURRENT_FILTERED || []).filter(s => s.type === type && s.row[key] !== '' && s.row[key] != null && !Number.isNaN(Number(s.row[key])));
+  if (!samples.length) {
+    wrap.innerHTML = '<div class="trend-empty">ไม่มีข้อมูลของพารามิเตอร์นี้ตามตัวกรองปัจจุบัน</div>';
+    return;
+  }
+
+  // Group by site, sorted chronologically within each site.
+  const bySite = {};
+  samples.forEach(s => {
+    (bySite[s.site.site_id] ||= { site: s.site, points: [] }).points.push({
+      date: parseDateLocal(s.date), dateStr: s.date, value: Number(s.row[key]),
+    });
+  });
+  let siteGroups = Object.values(bySite);
+  siteGroups.forEach(g => g.points.sort((a, b) => a.date - b.date));
+  siteGroups.sort((a, b) => a.site.site_id.localeCompare(b.site.site_id));
+
+  let truncNote = '';
+  if (siteGroups.length > TREND_MAX_SERIES) {
+    truncNote = `<div class="trend-empty">มี ${siteGroups.length} จุดตามตัวกรองปัจจุบัน แสดงได้สูงสุด ${TREND_MAX_SERIES} เส้น — กรองเพิ่มเติม (เช่น จังหวัด/โครงการ) เพื่อดูครบ</div>`;
+    siteGroups = siteGroups.slice(0, TREND_MAX_SERIES);
+  }
+
+  // Reference threshold — only draw it if every charted site resolves to
+  // the exact same min/max (sites can carry different standard_set values).
+  const thresholds = siteGroups.map(g => lookupStandard(g.site.standard_set, type, key));
+  let threshold = null;
+  if (thresholds.every(t => t && thresholds[0] && t.min === thresholds[0].min && t.max === thresholds[0].max)) {
+    threshold = thresholds[0];
+  }
+
+  const allDates = siteGroups.flatMap(g => g.points.map(p => p.date.getTime()));
+  const allValues = siteGroups.flatMap(g => g.points.map(p => p.value));
+  const dateMin = Math.min(...allDates), dateMax = Math.max(...allDates);
+  let valueMax = Math.max(...allValues, threshold?.max ?? -Infinity) * 1.15;
+  if (!Number.isFinite(valueMax) || valueMax <= 0) valueMax = Math.max(...allValues, 1) * 1.15;
+  const valueMin = Math.min(0, Math.min(...allValues, threshold?.min ?? 0));
+
+  const width = Math.max(600, wrap.clientWidth || 600);
+  const height = 320;
+  const margin = { top: 16, right: 16, bottom: 34, left: 54 };
+  const plotW = width - margin.left - margin.right;
+  const plotH = height - margin.top - margin.bottom;
+
+  const xScale = t => margin.left + (dateMax === dateMin ? plotW / 2 : ((t - dateMin) / (dateMax - dateMin)) * plotW);
+  const yScale = v => margin.top + plotH - ((v - valueMin) / (valueMax - valueMin || 1)) * plotH;
+
+  const colors = isDarkActive() ? TREND_COLORS_DARK : TREND_COLORS_LIGHT;
+
+  const gridSteps = 4;
+  let gridlines = '';
+  for (let i = 0; i <= gridSteps; i++) {
+    const v = valueMin + ((valueMax - valueMin) * i) / gridSteps;
+    const y = yScale(v);
+    gridlines += `<line class="trend-gridline" x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" />`;
+    gridlines += `<text class="trend-axis-label" x="${margin.left - 8}" y="${y + 3}" text-anchor="end">${v.toFixed(v < 10 ? 1 : 0)}</text>`;
+  }
+
+  const tickCount = Math.min(6, siteGroups.reduce((n, g) => Math.max(n, g.points.length), 2));
+  let xTicks = '';
+  for (let i = 0; i < tickCount; i++) {
+    const t = dateMin + ((dateMax - dateMin) * i) / (tickCount - 1 || 1);
+    const x = xScale(t);
+    xTicks += `<text class="trend-axis-label" x="${x}" y="${height - margin.bottom + 16}" text-anchor="middle">${formatDateShort(new Date(t))}</text>`;
+  }
+
+  let thresholdSvg = '';
+  if (threshold) {
+    if (threshold.max != null) {
+      const y = yScale(threshold.max);
+      thresholdSvg += `<line class="trend-threshold" x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" />`;
+      thresholdSvg += `<text class="trend-threshold-label" x="${width - margin.right}" y="${y - 4}" text-anchor="end">max ${threshold.max}</text>`;
+    }
+    if (threshold.min != null) {
+      const y = yScale(threshold.min);
+      thresholdSvg += `<line class="trend-threshold" x1="${margin.left}" y1="${y}" x2="${width - margin.right}" y2="${y}" />`;
+      thresholdSvg += `<text class="trend-threshold-label" x="${width - margin.right}" y="${y - 4}" text-anchor="end">min ${threshold.min}</text>`;
+    }
+  }
+
+  let seriesSvg = '';
+  let legendHtml = '';
+  siteGroups.forEach((g, i) => {
+    const color = colors[i % colors.length];
+    const pathD = g.points.map((p, j) => `${j === 0 ? 'M' : 'L'}${xScale(p.date.getTime())},${yScale(p.value)}`).join(' ');
+    seriesSvg += `<path d="${pathD}" fill="none" style="stroke:${color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />`;
+    g.points.forEach(p => {
+      seriesSvg += `<circle cx="${xScale(p.date.getTime())}" cy="${yScale(p.value)}" r="4" style="fill:${color}" stroke="var(--surface-1)" stroke-width="1.5"><title>${escapeHtml(g.site.site_id)} — ${escapeHtml(p.dateStr)}: ${p.value}</title></circle>`;
+    });
+    legendHtml += `<span class="item"><span class="swatch" style="background:${color}"></span>${escapeHtml(g.site.site_id)} — ${escapeHtml(g.site.name)}</span>`;
+  });
+
+  wrap.innerHTML = `
+    ${truncNote}
+    <svg width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="กราฟแนวโน้ม ${escapeHtml(paramDef?.label || key)}">
+      ${gridlines}
+      ${thresholdSvg}
+      ${seriesSvg}
+      ${xTicks}
+    </svg>
+    <div class="trend-legend">${legendHtml}</div>
+    <div class="trend-empty" style="padding-top:2px">แต่ละจุดวางเมาส์ดูค่า/วันที่ได้ ${threshold ? '' : '(ไม่แสดงเส้นมาตรฐาน เพราะจุดที่เลือกใช้คนละชุดมาตรฐานกัน)'}</div>
+  `;
+}
+
 function applyFilters(fit = true) {
   const type = document.getElementById('f-type').value;
   const status = document.getElementById('f-status').value;
@@ -1019,6 +1188,7 @@ function applyFilters(fit = true) {
   renderStats(filtered);
   renderTable(filtered);
   renderMap(filtered, fit);
+  renderTrendChart();
 }
 
 function renderAll(fit = true) {
@@ -1562,6 +1732,7 @@ document.getElementById('theme-toggle-btn').addEventListener('click', () => {
 syncThemeButtonLabel();
 
 initMap();
+populateTrendParamSelect();
 restoreCustomLayersFromStorage();
 const savedId = localStorage.getItem('esd_sheet_id') || '';
 if (savedId) document.getElementById('sheet-id-input').value = savedId;
