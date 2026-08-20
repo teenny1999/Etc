@@ -393,6 +393,7 @@
 <div id="photo-modal"><img id="photo-modal-img" src="" alt=""></div>
 <datalist id="province-datalist"></datalist>
 <datalist id="case-type-datalist"></datalist>
+<datalist id="standard-set-datalist"></datalist>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
   integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
@@ -448,7 +449,7 @@ const SHEET_TABS = { sites: 'Sites', soil: 'Soil_Results', water: 'Water_Results
 
 const DEMO = {
   sites: [
-    { site_id: 'S-001', name: 'บ่อสังเกตการณ์น้ำใต้ดิน จุด 1', type: 'water', lat: 13.7563, lng: 100.5018, project: 'โครงการทดสอบ A', province: 'ราชบุรี', case_type: 'ร้องเรียน' },
+    { site_id: 'S-001', name: 'บ่อสังเกตการณ์น้ำใต้ดิน จุด 1', type: 'water', lat: 13.7563, lng: 100.5018, project: 'โครงการทดสอบ A', province: 'ราชบุรี', case_type: 'ร้องเรียน', standard_set: 'เข้มงวด (ตัวอย่าง)' },
     { site_id: 'S-002', name: 'คลองสาธารณะ ท้ายโรงงาน', type: 'water', lat: 13.7301, lng: 100.5231, project: 'โครงการทดสอบ A', province: 'ราชบุรี', case_type: 'ร้องเรียน' },
     { site_id: 'S-003', name: 'แปลงดินเกษตร รอบพื้นที่โครงการ', type: 'soil', lat: 13.7890, lng: 100.4890, project: 'โครงการทดสอบ A', province: 'ราชบุรี', case_type: 'ร้องเรียน' },
     { site_id: 'S-004', name: 'ดินบริเวณบ่อพักกากของเสีย', type: 'soil', lat: 13.7050, lng: 100.5400, project: 'โครงการทดสอบ A', province: 'ราชบุรี', case_type: 'ร้องเรียน' },
@@ -473,24 +474,30 @@ const DEMO = {
   // EXAMPLE thresholds only — NOT verified legal values. Replace with the
   // actual figures from the relevant ประกาศกระทรวงทรัพยากรธรรมชาติและสิ่งแวดล้อม
   // (or other applicable notification) before using this for real reporting.
+  // A blank standard_set is the default/general set; a site can opt into a
+  // named set (e.g. a stricter local limit) via its own `standard_set` column.
   standards: [
-    { sample_type: 'water', parameter: 'ph', min: 5, max: 9 },
-    { sample_type: 'water', parameter: 'do', min: 4, max: '' },
-    { sample_type: 'water', parameter: 'bod', min: '', max: 4 },
-    { sample_type: 'water', parameter: 'turbidity', min: '', max: 20 },
-    { sample_type: 'water', parameter: 'coliform', min: '', max: 5000 },
-    { sample_type: 'water', parameter: 'pb', min: '', max: 0.05 },
-    { sample_type: 'soil', parameter: 'ph', min: 4.5, max: 8.5 },
-    { sample_type: 'soil', parameter: 'pb', min: '', max: 400 },
-    { sample_type: 'soil', parameter: 'cd', min: '', max: 5 },
-    { sample_type: 'soil', parameter: 'cr', min: '', max: 300 },
-    { sample_type: 'soil', parameter: 'as', min: '', max: 3.9 },
-    { sample_type: 'soil', parameter: 'hg', min: '', max: 0.8 },
-    { sample_type: 'air', parameter: 'pm25', min: '', max: 37.5 },
-    { sample_type: 'air', parameter: 'pm10', min: '', max: 120 },
-    { sample_type: 'air', parameter: 'so2', min: '', max: 100 },
-    { sample_type: 'air', parameter: 'no2', min: '', max: 170 },
-    { sample_type: 'air', parameter: 'noise', min: '', max: 70 },
+    { standard_set: '', sample_type: 'water', parameter: 'ph', min: 5, max: 9 },
+    { standard_set: '', sample_type: 'water', parameter: 'do', min: 4, max: '' },
+    { standard_set: '', sample_type: 'water', parameter: 'bod', min: '', max: 4 },
+    { standard_set: '', sample_type: 'water', parameter: 'turbidity', min: '', max: 20 },
+    { standard_set: '', sample_type: 'water', parameter: 'coliform', min: '', max: 5000 },
+    { standard_set: '', sample_type: 'water', parameter: 'pb', min: '', max: 0.05 },
+    { standard_set: '', sample_type: 'soil', parameter: 'ph', min: 4.5, max: 8.5 },
+    { standard_set: '', sample_type: 'soil', parameter: 'pb', min: '', max: 400 },
+    { standard_set: '', sample_type: 'soil', parameter: 'cd', min: '', max: 5 },
+    { standard_set: '', sample_type: 'soil', parameter: 'cr', min: '', max: 300 },
+    { standard_set: '', sample_type: 'soil', parameter: 'as', min: '', max: 3.9 },
+    { standard_set: '', sample_type: 'soil', parameter: 'hg', min: '', max: 0.8 },
+    { standard_set: '', sample_type: 'air', parameter: 'pm25', min: '', max: 37.5 },
+    { standard_set: '', sample_type: 'air', parameter: 'pm10', min: '', max: 120 },
+    { standard_set: '', sample_type: 'air', parameter: 'so2', min: '', max: 100 },
+    { standard_set: '', sample_type: 'air', parameter: 'no2', min: '', max: 170 },
+    { standard_set: '', sample_type: 'air', parameter: 'noise', min: '', max: 70 },
+    // Example of a named, stricter set (demonstrates multi-set support) —
+    // only overrides BOD; everything else for S-001 still falls back to
+    // the default water rules above.
+    { standard_set: 'เข้มงวด (ตัวอย่าง)', sample_type: 'water', parameter: 'bod', min: '', max: 1 },
   ],
 };
 
@@ -555,13 +562,18 @@ function hideBanner() {
 
 let STANDARDS_INDEX = {};
 
+// A row with a blank `standard_set` is the default/general set (key '').
+// Sites can opt into a stricter/different named set via their own
+// `standard_set` column (e.g. "น้ำผิวดินประเภท 3") — evaluation falls
+// back to the default set for any parameter the named set doesn't cover.
 function buildStandardsIndex(standards) {
   const idx = {};
   standards.forEach(row => {
+    const set = String(row.standard_set || '').trim().toLowerCase();
     const type = String(row.sample_type || '').trim().toLowerCase();
     const param = String(row.parameter || '').trim().toLowerCase();
     if (!type || !param) return;
-    idx[type + '.' + param] = {
+    idx[`${set}::${type}.${param}`] = {
       min: row.min === '' || row.min == null ? null : Number(row.min),
       max: row.max === '' || row.max == null ? null : Number(row.max),
     };
@@ -569,8 +581,13 @@ function buildStandardsIndex(standards) {
   return idx;
 }
 
+function lookupStandard(standardSet, type, param) {
+  const set = String(standardSet || '').trim().toLowerCase();
+  return STANDARDS_INDEX[`${set}::${type}.${param}`] || STANDARDS_INDEX[`::${type}.${param}`] || null;
+}
+
 // Returns { status: 'good'|'critical'|'none', failedParams: [{label, value}] }
-function evaluateSample(type, row) {
+function evaluateSample(type, row, standardSet) {
   const params = PARAM_CONFIG[type] || [];
   let sawStandard = false;
   const failed = [];
@@ -579,7 +596,7 @@ function evaluateSample(type, row) {
     if (raw === '' || raw == null) continue;
     const value = Number(raw);
     if (Number.isNaN(value)) continue;
-    const std = STANDARDS_INDEX[type + '.' + p.key];
+    const std = lookupStandard(standardSet, type, p.key);
     if (!std) continue;
     sawStandard = true;
     const tooLow = std.min != null && value < std.min;
@@ -616,7 +633,7 @@ function flattenSamples() {
       if (!site) return;
       out.push({
         type, site, date: row.date, sampler: row.sampler,
-        row, evalResult: evaluateSample(type, row),
+        row, evalResult: evaluateSample(type, row, site.standard_set),
       });
     });
   });
@@ -799,6 +816,7 @@ function renderMap(filteredSamples, fit = true) {
         <span style="color:#666">${escapeHtml(site.site_id)} · ${TYPE_LABEL[site.type] || site.type}</span><br>
         โครงการ: ${escapeHtml(site.project || '-')}<br>
         จังหวัด: ${escapeHtml(site.province || '-')} · กรณี: ${escapeHtml(site.case_type || '-')}<br>
+        ชุดมาตรฐาน: ${escapeHtml(site.standard_set || 'ค่าเริ่มต้น')}<br>
         จำนวนตัวอย่าง (ตามตัวกรอง): ${samples.length}`;
       if (latest) {
         popup += `<br>ล่าสุด: ${escapeHtml(latest.date)} — สถานะ: ${statusLabel(latest.evalResult.status)}`;
@@ -972,6 +990,13 @@ function populateDynamicFilters() {
     select.value = values.includes(previous) ? previous : 'all';
     document.getElementById(datalistId).innerHTML = values.map(v => `<option value="${escapeHtml(v)}">`).join('');
   });
+  // Not a filter dropdown — standard_set is a per-site data attribute, only
+  // suggested (via datalist) when editing a pin.
+  const setValues = [...new Set([
+    ...DATA.sites.map(s => s.standard_set),
+    ...DATA.standards.map(s => s.standard_set),
+  ].filter(v => v))].sort((a, b) => a.localeCompare(b, 'th'));
+  document.getElementById('standard-set-datalist').innerHTML = setValues.map(v => `<option value="${escapeHtml(v)}">`).join('');
 }
 
 function applyFilters(fit = true) {
@@ -1252,6 +1277,7 @@ function buildSiteForm(site, isNew, latlng) {
     <div class="row"><label>โครงการ</label><input type="text" class="f-project" value="${escapeHtml(site ? site.project : '')}"></div>
     <div class="row"><label>จังหวัด</label><input type="text" class="f-province" value="${escapeHtml(site ? site.province : '')}" list="province-datalist"></div>
     <div class="row"><label>กรณี</label><input type="text" class="f-case-type" value="${escapeHtml(site ? site.case_type : '')}" list="case-type-datalist"></div>
+    <div class="row"><label>ชุดมาตรฐาน</label><input type="text" class="f-standard-set" value="${escapeHtml(site ? site.standard_set : '')}" list="standard-set-datalist" placeholder="เว้นว่าง = ใช้ค่าเริ่มต้น"></div>
     <div class="row"><label>Lat</label><input type="number" step="any" class="f-lat" value="${lat}"></div>
     <div class="row"><label>Lng</label><input type="number" step="any" class="f-lng" value="${lng}"></div>
     <div class="row actions">
@@ -1266,6 +1292,7 @@ function buildSiteForm(site, isNew, latlng) {
     const project = wrap.querySelector('.f-project').value.trim();
     const province = wrap.querySelector('.f-province').value.trim();
     const caseType = wrap.querySelector('.f-case-type').value.trim();
+    const standardSet = wrap.querySelector('.f-standard-set').value.trim();
     const newLat = parseFloat(wrap.querySelector('.f-lat').value);
     const newLng = parseFloat(wrap.querySelector('.f-lng').value);
     if (!id || !name || Number.isNaN(newLat) || Number.isNaN(newLng)) {
@@ -1273,9 +1300,9 @@ function buildSiteForm(site, isNew, latlng) {
     }
     if (isNew) {
       if (DATA.sites.some(s => s.site_id === id)) { alert('รหัสจุดนี้มีอยู่แล้ว ใช้รหัสอื่น'); return; }
-      DATA.sites.push({ site_id: id, name, type, lat: newLat, lng: newLng, project, province, case_type: caseType });
+      DATA.sites.push({ site_id: id, name, type, lat: newLat, lng: newLng, project, province, case_type: caseType, standard_set: standardSet });
     } else {
-      Object.assign(site, { name, type, project, province, case_type: caseType, lat: newLat, lng: newLng });
+      Object.assign(site, { name, type, project, province, case_type: caseType, standard_set: standardSet, lat: newLat, lng: newLng });
     }
     SITES_EDITED = true;
     refreshExportSitesLabel();
@@ -1298,7 +1325,7 @@ function buildSiteForm(site, isNew, latlng) {
 }
 
 function sitesToCsv(sites) {
-  const headers = ['site_id', 'name', 'type', 'lat', 'lng', 'project', 'province', 'case_type'];
+  const headers = ['site_id', 'name', 'type', 'lat', 'lng', 'project', 'province', 'case_type', 'standard_set'];
   const escapeCsv = v => {
     const s = String(v ?? '');
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
