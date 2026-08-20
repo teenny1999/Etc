@@ -268,7 +268,7 @@
       </div>
     </div>
     <div class="panel">
-      <h2>รายการผลตรวจ</h2>
+      <h2>รายการผลตรวจ <button class="btn secondary" id="copy-table-btn" type="button" style="font-weight:400">คัดลอกตาราง</button></h2>
       <div class="table-wrap">
         <table>
           <thead>
@@ -517,6 +517,7 @@ function evaluateSample(type, row) {
 
 let DATA = { sites: [], soil: [], water: [], air: [], standards: [] };
 let ALL_SAMPLES = []; // flattened: {site, type, date, sampler, row, evalResult}
+let CURRENT_FILTERED = []; // the samples currently shown in the results table (after filters)
 let map, markerLayer;
 
 function driveThumb(url, size) {
@@ -740,6 +741,43 @@ function renderTable(filteredSamples) {
   }).join('');
 }
 
+function resultsTableToTsv(samples) {
+  const headers = ['จุด', 'รหัสจุด', 'ประเภท', 'วันที่', 'สถานะ', 'ค่าที่เกินมาตรฐาน', 'ระยะจากแหล่งกำเนิด', 'รูป'];
+  const rows = samples.map(s => {
+    const failedText = s.evalResult.failedParams.length
+      ? s.evalResult.failedParams.map(f => `${f.label} = ${f.value}`).join('; ')
+      : '';
+    const nearest = nearestSource(s.site);
+    const distText = nearest ? `${formatDistanceKm(nearest.distanceKm)} จาก ${nearest.source.site_id}` : '';
+    return [
+      s.site.name, s.site.site_id, TYPE_LABEL[s.type] || s.type, s.date,
+      statusLabel(s.evalResult.status), failedText, distText, s.row.photo_url || '',
+    ];
+  });
+  return [headers, ...rows].map(cols => cols.map(c => String(c).replace(/\t/g, ' ').replace(/\n/g, ' ')).join('\t')).join('\n');
+}
+
+async function copyResultsTable() {
+  const btn = document.getElementById('copy-table-btn');
+  const originalText = btn.textContent;
+  const tsv = resultsTableToTsv(CURRENT_FILTERED);
+  try {
+    await navigator.clipboard.writeText(tsv);
+  } catch (err) {
+    const textarea = document.createElement('textarea');
+    textarea.value = tsv;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    document.execCommand('copy');
+    document.body.removeChild(textarea);
+  }
+  btn.textContent = 'คัดลอกแล้ว ✓';
+  setTimeout(() => { btn.textContent = originalText; }, 1500);
+}
+document.getElementById('copy-table-btn').addEventListener('click', copyResultsTable);
+
 function openPhoto(url) {
   document.getElementById('photo-modal-img').src = url;
   document.getElementById('photo-modal').classList.add('show');
@@ -771,6 +809,7 @@ function applyFilters(fit = true) {
     if (to && String(s.date) > to) return false;
     return true;
   });
+  CURRENT_FILTERED = filtered;
   renderStats(filtered);
   renderTable(filtered);
   renderMap(filtered, fit);
