@@ -164,6 +164,16 @@
     font-size: 11.5px; color: var(--text-secondary); background: var(--surface-2);
     padding: 6px 14px; border-bottom: 1px solid var(--border);
   }
+  .scale-bar {
+    display: flex; align-items: center; gap: 10px; font-size: 12px; color: var(--text-secondary);
+    background: var(--surface-2); padding: 6px 14px; border-bottom: 1px solid var(--border);
+  }
+  .scale-bar select {
+    padding: 3px 6px; border-radius: 5px; border: 1px solid var(--border);
+    background: var(--surface-1); color: var(--text-primary); font-size: 12px;
+  }
+  .scale-bar #scale-current { color: var(--text-muted); }
+  .leaflet-control-scale-line { background: rgba(255,255,255,.85); color: #333; }
   .site-edit-form { font-size: 12px; min-width: 220px; }
   .site-edit-form .row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; }
   .site-edit-form .row label { color: var(--text-secondary); flex-shrink: 0; }
@@ -296,6 +306,23 @@
         </span>
       </h2>
       <div id="edit-hint" style="display:none">โหมดแก้ไข: ลากหมุดเพื่อย้ายตำแหน่ง · คลิกหมุดเพื่อแก้ไข/ลบ · คลิกพื้นที่ว่างบนแผนที่เพื่อเพิ่มจุดใหม่ — การแก้ไขจะอยู่ในหน้านี้เท่านั้น กด "ส่งออก Sites.csv" เพื่อนำไปอัปเดตใน Google Sheet เอง</div>
+      <div class="scale-bar">
+        <label>มาตราส่วน
+          <select id="scale-preset">
+            <option value="">— เลือก —</option>
+            <option value="1000">1:1,000</option>
+            <option value="2500">1:2,500</option>
+            <option value="5000">1:5,000</option>
+            <option value="10000">1:10,000</option>
+            <option value="25000">1:25,000</option>
+            <option value="50000">1:50,000</option>
+            <option value="100000">1:100,000</option>
+            <option value="250000">1:250,000</option>
+            <option value="500000">1:500,000</option>
+          </select>
+        </label>
+        <span id="scale-current">มาตราส่วนปัจจุบัน ≈ –</span>
+      </div>
       <div id="map"></div>
       <div class="legend">
         <span><span class="dot" style="background:var(--status-good)"></span>ผ่านมาตรฐาน</span>
@@ -634,8 +661,30 @@ function nearestSource(site) {
 
 const BASE_LAYERS = {};
 
+// Map "scale" here means cartographic scale (1:N), not just zoom level —
+// standard OGC pixel size (0.28mm) relates zoom/latitude to a scale ratio.
+const OGC_METERS_PER_PIXEL = 0.00028;
+function metersPerPixel(zoom, lat) {
+  return 156543.03392 * Math.cos(lat * Math.PI / 180) / Math.pow(2, zoom);
+}
+function scaleForZoom(zoom, lat) {
+  return metersPerPixel(zoom, lat) / OGC_METERS_PER_PIXEL;
+}
+function zoomForScale(scale, lat) {
+  const targetMpp = scale * OGC_METERS_PER_PIXEL;
+  return Math.log2(156543.03392 * Math.cos(lat * Math.PI / 180) / targetMpp);
+}
+function updateScaleIndicator() {
+  const center = map.getCenter();
+  const scale = scaleForZoom(map.getZoom(), center.lat);
+  document.getElementById('scale-current').textContent =
+    `มาตราส่วนปัจจุบัน ≈ 1:${Math.round(scale).toLocaleString('th-TH')}`;
+}
+
 function initMap() {
-  map = L.map('map').setView([13.75, 100.52], 7);
+  // zoomSnap < 1 lets setZoom land closer to a requested cartographic scale —
+  // integer-only zoom steps (Leaflet's default) can be off by up to 2x.
+  map = L.map('map', { zoomSnap: 0.25 }).setView([13.75, 100.52], 7);
   BASE_LAYERS.satellite = L.tileLayer(
     'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
     { maxZoom: 19, attribution: 'Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community' }
@@ -648,7 +697,18 @@ function initMap() {
     { 'ภาพถ่ายดาวเทียม (Esri)': BASE_LAYERS.satellite, 'แผนที่ถนน (OSM)': BASE_LAYERS.street },
     null, { position: 'topright' }
   ).addTo(map);
+  L.control.scale({ metric: true, imperial: false, maxWidth: 150 }).addTo(map);
   markerLayer = L.layerGroup().addTo(map);
+
+  map.on('zoomend moveend', updateScaleIndicator);
+  updateScaleIndicator();
+  document.getElementById('scale-preset').addEventListener('change', (e) => {
+    if (!e.target.value) return;
+    const targetZoom = zoomForScale(Number(e.target.value), map.getCenter().lat);
+    map.setZoom(targetZoom);
+    e.target.value = '';
+  });
+
   map.on('click', (e) => {
     if (!EDIT_MODE) return;
     L.popup().setLatLng(e.latlng).setContent(buildSiteForm(null, true, e.latlng)).openOn(map);
