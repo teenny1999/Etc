@@ -741,7 +741,7 @@ function renderTable(filteredSamples) {
   }).join('');
 }
 
-function resultsTableToTsv(samples) {
+function resultsTableRows(samples) {
   const headers = ['จุด', 'รหัสจุด', 'ประเภท', 'วันที่', 'สถานะ', 'ค่าที่เกินมาตรฐาน', 'ระยะจากแหล่งกำเนิด', 'รูป'];
   const rows = samples.map(s => {
     const failedText = s.evalResult.failedParams.length
@@ -754,24 +754,60 @@ function resultsTableToTsv(samples) {
       statusLabel(s.evalResult.status), failedText, distText, s.row.photo_url || '',
     ];
   });
+  return { headers, rows };
+}
+
+function resultsTableToTsv(samples) {
+  const { headers, rows } = resultsTableRows(samples);
   return [headers, ...rows].map(cols => cols.map(c => String(c).replace(/\t/g, ' ').replace(/\n/g, ' ')).join('\t')).join('\n');
+}
+
+// Real <table> markup — pasting plain tab-separated text into Word/Docs
+// doesn't reliably become a table, but pasting HTML with a <table> does.
+function resultsTableToHtml(samples) {
+  const { headers, rows } = resultsTableRows(samples);
+  const th = c => `<th style="border:1px solid #999;padding:4px 8px;background:#eee;font-weight:bold;text-align:left">${escapeHtml(c)}</th>`;
+  const td = c => `<td style="border:1px solid #999;padding:4px 8px">${escapeHtml(c)}</td>`;
+  const headRow = `<tr>${headers.map(th).join('')}</tr>`;
+  const bodyRows = rows.map(cols => `<tr>${cols.map(td).join('')}</tr>`).join('');
+  return `<table style="border-collapse:collapse;font-family:sans-serif;font-size:13px">${headRow}${bodyRows}</table>`;
 }
 
 async function copyResultsTable() {
   const btn = document.getElementById('copy-table-btn');
   const originalText = btn.textContent;
   const tsv = resultsTableToTsv(CURRENT_FILTERED);
-  try {
-    await navigator.clipboard.writeText(tsv);
-  } catch (err) {
-    const textarea = document.createElement('textarea');
-    textarea.value = tsv;
-    textarea.style.position = 'fixed';
-    textarea.style.opacity = '0';
-    document.body.appendChild(textarea);
-    textarea.select();
-    document.execCommand('copy');
-    document.body.removeChild(textarea);
+  const html = resultsTableToHtml(CURRENT_FILTERED);
+  let ok = false;
+  if (window.ClipboardItem && navigator.clipboard.write) {
+    try {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          'text/html': new Blob([html], { type: 'text/html' }),
+          'text/plain': new Blob([tsv], { type: 'text/plain' }),
+        }),
+      ]);
+      ok = true;
+    } catch (err) { console.error(err); }
+  }
+  if (!ok) {
+    // Fallback: select a real rendered table and let execCommand('copy')
+    // pick up its HTML — plain writeText would only paste as tab text.
+    const container = document.createElement('div');
+    container.contentEditable = 'true';
+    container.style.position = 'fixed';
+    container.style.opacity = '0';
+    container.style.pointerEvents = 'none';
+    container.innerHTML = html;
+    document.body.appendChild(container);
+    const range = document.createRange();
+    range.selectNodeContents(container);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    try { document.execCommand('copy'); } catch (err) { console.error(err); }
+    selection.removeAllRanges();
+    document.body.removeChild(container);
   }
   btn.textContent = 'คัดลอกแล้ว ✓';
   setTimeout(() => { btn.textContent = originalText; }, 1500);
