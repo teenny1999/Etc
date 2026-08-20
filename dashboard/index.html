@@ -233,7 +233,7 @@
 
   <div class="layout">
     <div class="panel">
-      <h2>แผนที่จุดเก็บตัวอย่าง</h2>
+      <h2>แผนที่จุดเก็บตัวอย่าง <button class="btn" id="export-map-btn" type="button" style="font-weight:400">ส่งออกเป็นรูปภาพ</button></h2>
       <div id="map"></div>
       <div class="legend">
         <span><span class="dot" style="background:var(--status-good)"></span>ผ่านมาตรฐาน</span>
@@ -303,6 +303,8 @@
   integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 <script src="https://unpkg.com/jszip@3.10.1/dist/jszip.min.js"
   integrity="sha256-rMfkFFWoB2W1/Zx+4bgHim0WC7vKRVrq6FTeZclH1Z4=" crossorigin=""></script>
+<script src="https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js"
+  integrity="sha256-6H5VB5QyLldKH9oMFUmjxw2uWpPZETQXpCkBaDjquMs=" crossorigin=""></script>
 <script>
 /* =========================================================================
    CONFIG
@@ -937,6 +939,38 @@ document.getElementById('kml-import-btn').addEventListener('click', async () => 
   if (featureBounds.length) map.fitBounds(featureBounds, { padding: [30, 30] });
   fileInput.value = '';
   if (skipped > 0) alert(`นำเข้าสำเร็จ ${imported} รายการ, ข้าม ${skipped} รายการ (มักเป็น Ground Overlay ที่หารูปภาพอ้างอิงไม่พบ — ใช้ไฟล์ .kmz แทน .kml จะช่วยได้)`);
+});
+
+/* =========================================================================
+   EXPORT MAP AS IMAGE
+   ========================================================================= */
+
+document.getElementById('export-map-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('export-map-btn');
+  const controls = document.querySelector('#map .leaflet-control-container');
+  const originalText = btn.textContent;
+  btn.textContent = 'กำลังส่งออก...';
+  btn.disabled = true;
+  if (controls) controls.style.display = 'none';
+  try {
+    const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 20000));
+    const canvas = await Promise.race([
+      html2canvas(document.getElementById('map'), { useCORS: true, allowTaint: false }),
+      timeout,
+    ]);
+    const link = document.createElement('a');
+    const stamp = new Date().toISOString().slice(0, 10);
+    link.download = `environmental-map-${stamp}.png`;
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  } catch (err) {
+    console.error(err);
+    alert('ส่งออกรูปภาพไม่สำเร็จ (หรือใช้เวลานานเกินไป) มักเกิดจากพื้นหลังแผนที่ (เช่น OpenStreetMap) ไม่อนุญาตให้ดึงภาพข้ามโดเมน (CORS) หรือโหลดไทล์ไม่ครบ — ลองสลับไปใช้พื้นหลัง "ภาพถ่ายดาวเทียม (Esri)" แล้วลองใหม่ หรือใช้การพิมพ์หน้าจอ/สกรีนช็อตแทน');
+  } finally {
+    if (controls) controls.style.display = '';
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
 });
 
 /* =========================================================================
