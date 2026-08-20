@@ -245,6 +245,16 @@
   </div>
 
   <div class="filters">
+    <label>จังหวัด
+      <select id="f-province">
+        <option value="all">ทั้งหมด</option>
+      </select>
+    </label>
+    <label>กรณี
+      <select id="f-case-type">
+        <option value="all">ทั้งหมด</option>
+      </select>
+    </label>
     <label>ประเภท
       <select id="f-type">
         <option value="all">ทั้งหมด</option>
@@ -350,6 +360,8 @@
 <footer>Environmental Sample Dashboard — v0.1 alpha · ข้อมูลมาตรฐานเป็นตัวอย่างเท่านั้น ต้องตรวจสอบกับประกาศกฎหมายจริงก่อนใช้รายงาน</footer>
 
 <div id="photo-modal"><img id="photo-modal-img" src="" alt=""></div>
+<datalist id="province-datalist"></datalist>
+<datalist id="case-type-datalist"></datalist>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
   integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
@@ -405,14 +417,14 @@ const SHEET_TABS = { sites: 'Sites', soil: 'Soil_Results', water: 'Water_Results
 
 const DEMO = {
   sites: [
-    { site_id: 'S-001', name: 'บ่อสังเกตการณ์น้ำใต้ดิน จุด 1', type: 'water', lat: 13.7563, lng: 100.5018, project: 'โครงการทดสอบ A' },
-    { site_id: 'S-002', name: 'คลองสาธารณะ ท้ายโรงงาน', type: 'water', lat: 13.7301, lng: 100.5231, project: 'โครงการทดสอบ A' },
-    { site_id: 'S-003', name: 'แปลงดินเกษตร รอบพื้นที่โครงการ', type: 'soil', lat: 13.7890, lng: 100.4890, project: 'โครงการทดสอบ A' },
-    { site_id: 'S-004', name: 'ดินบริเวณบ่อพักกากของเสีย', type: 'soil', lat: 13.7050, lng: 100.5400, project: 'โครงการทดสอบ A' },
-    { site_id: 'S-005', name: 'สถานีตรวจวัดอากาศ ชุมชนใกล้เคียง', type: 'air', lat: 13.7700, lng: 100.5550, project: 'โครงการทดสอบ B' },
-    { site_id: 'S-006', name: 'สถานีตรวจวัดอากาศ แนวรั้วโรงงาน', type: 'air', lat: 13.7420, lng: 100.4700, project: 'โครงการทดสอบ B' },
-    { site_id: 'SRC-1', name: 'โรงงานอุตสาหกรรม (แหล่งกำเนิด)', type: 'source', lat: 13.7180, lng: 100.5150, project: 'โครงการทดสอบ A' },
-    { site_id: 'SRC-2', name: 'ปล่องระบายอากาศ (แหล่งกำเนิด)', type: 'source', lat: 13.7560, lng: 100.5620, project: 'โครงการทดสอบ B' },
+    { site_id: 'S-001', name: 'บ่อสังเกตการณ์น้ำใต้ดิน จุด 1', type: 'water', lat: 13.7563, lng: 100.5018, project: 'โครงการทดสอบ A', province: 'ราชบุรี', case_type: 'ร้องเรียน' },
+    { site_id: 'S-002', name: 'คลองสาธารณะ ท้ายโรงงาน', type: 'water', lat: 13.7301, lng: 100.5231, project: 'โครงการทดสอบ A', province: 'ราชบุรี', case_type: 'ร้องเรียน' },
+    { site_id: 'S-003', name: 'แปลงดินเกษตร รอบพื้นที่โครงการ', type: 'soil', lat: 13.7890, lng: 100.4890, project: 'โครงการทดสอบ A', province: 'ราชบุรี', case_type: 'ร้องเรียน' },
+    { site_id: 'S-004', name: 'ดินบริเวณบ่อพักกากของเสีย', type: 'soil', lat: 13.7050, lng: 100.5400, project: 'โครงการทดสอบ A', province: 'ราชบุรี', case_type: 'ร้องเรียน' },
+    { site_id: 'S-005', name: 'สถานีตรวจวัดอากาศ ชุมชนใกล้เคียง', type: 'air', lat: 13.7700, lng: 100.5550, project: 'โครงการทดสอบ B', province: 'บุรีรัมย์', case_type: 'ตรวจติดตามตามแผน' },
+    { site_id: 'S-006', name: 'สถานีตรวจวัดอากาศ แนวรั้วโรงงาน', type: 'air', lat: 13.7420, lng: 100.4700, project: 'โครงการทดสอบ B', province: 'บุรีรัมย์', case_type: 'ตรวจติดตามตามแผน' },
+    { site_id: 'SRC-1', name: 'โรงงานอุตสาหกรรม (แหล่งกำเนิด)', type: 'source', lat: 13.7180, lng: 100.5150, project: 'โครงการทดสอบ A', province: 'ราชบุรี', case_type: 'ร้องเรียน' },
+    { site_id: 'SRC-2', name: 'ปล่องระบายอากาศ (แหล่งกำเนิด)', type: 'source', lat: 13.7560, lng: 100.5620, project: 'โครงการทดสอบ B', province: 'บุรีรัมย์', case_type: 'ตรวจติดตามตามแผน' },
   ],
   water: [
     { site_id: 'S-001', date: '2026-07-10', sampler: 'สมชาย', ph: 7.1, do: 6.2, bod: 1.8, turbidity: 4, coliform: 200, pb: 0.005, photo_url: '' },
@@ -669,20 +681,30 @@ function attachEditBehavior(marker, site) {
   });
 }
 
+function passesLocationFilter(site) {
+  const province = document.getElementById('f-province').value;
+  const caseType = document.getElementById('f-case-type').value;
+  if (province !== 'all' && site.province !== province) return false;
+  if (caseType !== 'all' && site.case_type !== caseType) return false;
+  return true;
+}
+
 function renderMap(filteredSamples, fit = true) {
   markerLayer.clearLayers();
   const visibleSiteIds = new Set(filteredSamples.map(s => s.site.site_id));
   const bounds = [];
   const showDist = document.getElementById('f-show-dist').checked;
 
-  // Source / reference points — always shown, not tied to sample filters.
+  // Source / reference points — shown regardless of type/status/date filters
+  // (they carry no samples of their own), but still respect จังหวัด/กรณี.
   DATA.sites.filter(s => s.type === 'source').forEach(site => {
+    if (!EDIT_MODE && !passesLocationFilter(site)) return;
     const marker = L.marker([site.lat, site.lng], { icon: SOURCE_ICON }).addTo(markerLayer);
     marker.bindTooltip(escapeHtml(site.site_id), { permanent: true, direction: 'top', offset: [0, -8], className: 'site-label' });
     if (EDIT_MODE) {
       attachEditBehavior(marker, site);
     } else {
-      marker.bindPopup(`<b>${escapeHtml(site.name)}</b><br><span style="color:#666">${escapeHtml(site.site_id)} · แหล่งกำเนิด/จุดอ้างอิง</span><br>โครงการ: ${escapeHtml(site.project || '-')}`);
+      marker.bindPopup(`<b>${escapeHtml(site.name)}</b><br><span style="color:#666">${escapeHtml(site.site_id)} · แหล่งกำเนิด/จุดอ้างอิง</span><br>โครงการ: ${escapeHtml(site.project || '-')}<br>จังหวัด: ${escapeHtml(site.province || '-')} · กรณี: ${escapeHtml(site.case_type || '-')}`);
     }
     bounds.push([site.lat, site.lng]);
   });
@@ -703,6 +725,7 @@ function renderMap(filteredSamples, fit = true) {
       let popup = `<b>${escapeHtml(site.name)}</b><br>
         <span style="color:#666">${escapeHtml(site.site_id)} · ${TYPE_LABEL[site.type] || site.type}</span><br>
         โครงการ: ${escapeHtml(site.project || '-')}<br>
+        จังหวัด: ${escapeHtml(site.province || '-')} · กรณี: ${escapeHtml(site.case_type || '-')}<br>
         จำนวนตัวอย่าง (ตามตัวกรอง): ${samples.length}`;
       if (latest) {
         popup += `<br>ล่าสุด: ${escapeHtml(latest.date)} — สถานะ: ${statusLabel(latest.evalResult.status)}`;
@@ -860,16 +883,38 @@ function renderStats(filteredSamples) {
   document.getElementById('stat-fail').textContent = fail;
 }
 
+// Rebuilds the จังหวัด/กรณี dropdown options from whatever values exist in
+// the loaded Sites — these aren't fixed enums like ประเภท/สถานะ, so the
+// option lists have to follow the data.
+function populateDynamicFilters() {
+  [
+    ['f-province', 'province-datalist', 'province'],
+    ['f-case-type', 'case-type-datalist', 'case_type'],
+  ].forEach(([selectId, datalistId, field]) => {
+    const select = document.getElementById(selectId);
+    const previous = select.value;
+    const values = [...new Set(DATA.sites.map(s => s[field]).filter(v => v))].sort((a, b) => a.localeCompare(b, 'th'));
+    select.innerHTML = '<option value="all">ทั้งหมด</option>' +
+      values.map(v => `<option value="${escapeHtml(v)}">${escapeHtml(v)}</option>`).join('');
+    select.value = values.includes(previous) ? previous : 'all';
+    document.getElementById(datalistId).innerHTML = values.map(v => `<option value="${escapeHtml(v)}">`).join('');
+  });
+}
+
 function applyFilters(fit = true) {
   const type = document.getElementById('f-type').value;
   const status = document.getElementById('f-status').value;
   const from = document.getElementById('f-from').value;
   const to = document.getElementById('f-to').value;
+  const province = document.getElementById('f-province').value;
+  const caseType = document.getElementById('f-case-type').value;
   let filtered = ALL_SAMPLES.filter(s => {
     if (type !== 'all' && s.type !== type) return false;
     if (status !== 'all' && s.evalResult.status !== status) return false;
     if (from && String(s.date) < from) return false;
     if (to && String(s.date) > to) return false;
+    if (province !== 'all' && s.site.province !== province) return false;
+    if (caseType !== 'all' && s.site.case_type !== caseType) return false;
     return true;
   });
   CURRENT_FILTERED = filtered;
@@ -883,7 +928,7 @@ function renderAll(fit = true) {
   applyFilters(fit);
 }
 
-['f-type', 'f-status', 'f-from', 'f-to'].forEach(id => {
+['f-type', 'f-status', 'f-from', 'f-to', 'f-province', 'f-case-type'].forEach(id => {
   document.getElementById(id).addEventListener('change', () => applyFilters(true));
 });
 ['f-show-dist', 'dist-color', 'dist-decimals'].forEach(id => {
@@ -895,6 +940,8 @@ document.getElementById('f-reset').addEventListener('click', () => {
   document.getElementById('f-status').value = 'all';
   document.getElementById('f-from').value = '';
   document.getElementById('f-to').value = '';
+  document.getElementById('f-province').value = 'all';
+  document.getElementById('f-case-type').value = 'all';
   applyFilters();
 });
 
@@ -1130,6 +1177,8 @@ function buildSiteForm(site, isNew, latlng) {
       </select>
     </div>
     <div class="row"><label>โครงการ</label><input type="text" class="f-project" value="${escapeHtml(site ? site.project : '')}"></div>
+    <div class="row"><label>จังหวัด</label><input type="text" class="f-province" value="${escapeHtml(site ? site.province : '')}" list="province-datalist"></div>
+    <div class="row"><label>กรณี</label><input type="text" class="f-case-type" value="${escapeHtml(site ? site.case_type : '')}" list="case-type-datalist"></div>
     <div class="row"><label>Lat</label><input type="number" step="any" class="f-lat" value="${lat}"></div>
     <div class="row"><label>Lng</label><input type="number" step="any" class="f-lng" value="${lng}"></div>
     <div class="row actions">
@@ -1142,6 +1191,8 @@ function buildSiteForm(site, isNew, latlng) {
     const name = wrap.querySelector('.f-name').value.trim();
     const type = wrap.querySelector('.f-type').value;
     const project = wrap.querySelector('.f-project').value.trim();
+    const province = wrap.querySelector('.f-province').value.trim();
+    const caseType = wrap.querySelector('.f-case-type').value.trim();
     const newLat = parseFloat(wrap.querySelector('.f-lat').value);
     const newLng = parseFloat(wrap.querySelector('.f-lng').value);
     if (!id || !name || Number.isNaN(newLat) || Number.isNaN(newLng)) {
@@ -1149,13 +1200,14 @@ function buildSiteForm(site, isNew, latlng) {
     }
     if (isNew) {
       if (DATA.sites.some(s => s.site_id === id)) { alert('รหัสจุดนี้มีอยู่แล้ว ใช้รหัสอื่น'); return; }
-      DATA.sites.push({ site_id: id, name, type, lat: newLat, lng: newLng, project });
+      DATA.sites.push({ site_id: id, name, type, lat: newLat, lng: newLng, project, province, case_type: caseType });
     } else {
-      Object.assign(site, { name, type, project, lat: newLat, lng: newLng });
+      Object.assign(site, { name, type, project, province, case_type: caseType, lat: newLat, lng: newLng });
     }
     SITES_EDITED = true;
     refreshExportSitesLabel();
     map.closePopup();
+    populateDynamicFilters();
     renderAll(false);
   });
   if (!isNew) {
@@ -1165,6 +1217,7 @@ function buildSiteForm(site, isNew, latlng) {
       SITES_EDITED = true;
       refreshExportSitesLabel();
       map.closePopup();
+      populateDynamicFilters();
       renderAll(false);
     });
   }
@@ -1172,7 +1225,7 @@ function buildSiteForm(site, isNew, latlng) {
 }
 
 function sitesToCsv(sites) {
-  const headers = ['site_id', 'name', 'type', 'lat', 'lng', 'project'];
+  const headers = ['site_id', 'name', 'type', 'lat', 'lng', 'project', 'province', 'case_type'];
   const escapeCsv = v => {
     const s = String(v ?? '');
     return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
@@ -1256,6 +1309,7 @@ async function boot(sheetId) {
     DATA = DEMO;
   }
   STANDARDS_INDEX = buildStandardsIndex(DATA.standards);
+  populateDynamicFilters();
   renderAll();
 }
 
