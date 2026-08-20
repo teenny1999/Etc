@@ -96,6 +96,8 @@
     background: var(--series-water); color: #fff; font-size: 12px; cursor: pointer; font-weight: 500;
   }
   .sheet-config button.secondary, .btn.secondary { background: transparent; color: var(--text-secondary); }
+  .auto-refresh-label { font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 5px; }
+  .last-updated-text { font-size: 11px; color: var(--text-muted); }
   #status-banner {
     display: none; padding: 8px 20px; font-size: 12px; background: #fff7e6; color: #6b4f00; border-bottom: 1px solid var(--border);
   }
@@ -241,6 +243,8 @@
     <input type="text" id="sheet-id-input" placeholder="วาง Google Sheet ID ที่นี่ (เว้นว่าง = ใช้ข้อมูลตัวอย่าง)">
     <button id="load-btn">โหลดข้อมูล</button>
     <button class="secondary" id="demo-btn">ใช้ข้อมูลตัวอย่าง</button>
+    <label class="auto-refresh-label"><input type="checkbox" id="auto-refresh-toggle" checked> รีเฟรชอัตโนมัติทุก 5 นาที</label>
+    <span id="last-updated" class="last-updated-text"></span>
     <button class="secondary" id="theme-toggle-btn" type="button">🌙 โหมดมืด</button>
   </div>
 </header>
@@ -305,7 +309,7 @@
           <button class="btn" id="export-map-btn" type="button" style="font-weight:400">ส่งออกเป็นรูปภาพ</button>
         </span>
       </h2>
-      <div id="edit-hint" style="display:none">โหมดแก้ไข: ลากหมุดเพื่อย้ายตำแหน่ง · คลิกหมุดเพื่อแก้ไข/ลบ · คลิกพื้นที่ว่างบนแผนที่เพื่อเพิ่มจุดใหม่ — การแก้ไขจะอยู่ในหน้านี้เท่านั้น กด "ส่งออก Sites.csv" เพื่อนำไปอัปเดตใน Google Sheet เอง</div>
+      <div id="edit-hint" style="display:none">โหมดแก้ไข: ลากหมุดเพื่อย้ายตำแหน่ง · คลิกหมุดเพื่อแก้ไข/ลบ · คลิกพื้นที่ว่างบนแผนที่เพื่อเพิ่มจุดใหม่ — การแก้ไขจะอยู่ในหน้านี้เท่านั้น กด "ส่งออก Sites.csv" เพื่อนำไปอัปเดตใน Google Sheet เอง (ระบบจะหยุดรีเฟรชข้อมูลอัตโนมัติชั่วคราวระหว่างนี้ ป้องกันข้อมูลที่แก้ไขหาย)</div>
       <div class="scale-bar">
         <label>มาตราส่วน
           <select id="scale-preset">
@@ -498,22 +502,31 @@ function gvizUrl(sheetId, tabName) {
   return `https://docs.google.com/spreadsheets/d/${encodeURIComponent(sheetId)}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(tabName)}`;
 }
 
-async function fetchTab(sheetId, tabName) {
-  const res = await fetch(gvizUrl(sheetId, tabName));
-  if (!res.ok) throw new Error('sheet fetch failed: ' + tabName);
-  const text = await res.text();
-  const start = text.indexOf('{');
-  const end = text.lastIndexOf('}');
-  const json = JSON.parse(text.substring(start, end + 1));
-  const cols = json.table.cols.map((c, i) => (c.label || c.id || ('col' + i)).trim());
-  return json.table.rows.map(r => {
-    const obj = {};
-    cols.forEach((c, i) => {
-      const cell = r.c[i];
-      obj[c] = cell ? (cell.v ?? '') : '';
+async function fetchTab(sheetId, tabName, timeoutMs = 15000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(gvizUrl(sheetId, tabName), { signal: controller.signal });
+    if (!res.ok) throw new Error('sheet fetch failed: ' + tabName);
+    const text = await res.text();
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    const json = JSON.parse(text.substring(start, end + 1));
+    const cols = json.table.cols.map((c, i) => (c.label || c.id || ('col' + i)).trim());
+    return json.table.rows.map(r => {
+      const obj = {};
+      cols.forEach((c, i) => {
+        const cell = r.c[i];
+        obj[c] = cell ? (cell.v ?? '') : '';
+      });
+      return obj;
     });
-    return obj;
-  });
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error(`โหลดชีท "${tabName}" หมดเวลา (เกิน ${timeoutMs / 1000} วินาที)`);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function loadFromSheet(sheetId) {
@@ -1353,24 +1366,67 @@ document.getElementById('export-map-btn').addEventListener('click', async () => 
    BOOT
    ========================================================================= */
 
-async function boot(sheetId) {
+// --- auto-refresh -----------------------------------------------------
+// Keeps everyone looking at the dashboard reasonably in sync with the
+// Google Sheet without a real write-back API: periodically re-fetch and
+// re-render, but never while a pin edit is in progress (or unsaved) —
+// that would silently discard local changes mid-edit.
+
+let lastLoadedAt = null;
+let autoRefreshTimer = null;
+const AUTO_REFRESH_MS = 5 * 60 * 1000;
+
+function updateLastUpdatedLabel() {
+  const el = document.getElementById('last-updated');
+  if (!lastLoadedAt) { el.textContent = ''; return; }
+  const pad = n => String(n).padStart(2, '0');
+  el.textContent = `อัปเดตล่าสุด ${pad(lastLoadedAt.getHours())}:${pad(lastLoadedAt.getMinutes())}:${pad(lastLoadedAt.getSeconds())}`;
+}
+
+function restartAutoRefresh(sheetId) {
+  if (autoRefreshTimer) clearInterval(autoRefreshTimer);
+  autoRefreshTimer = null;
+  if (!sheetId || !document.getElementById('auto-refresh-toggle').checked) return;
+  autoRefreshTimer = setInterval(() => {
+    if (EDIT_MODE || SITES_EDITED) return; // don't clobber in-progress/unsaved edits
+    boot(sheetId, { fit: false, silent: true });
+  }, AUTO_REFRESH_MS);
+}
+document.getElementById('auto-refresh-toggle').addEventListener('change', () => {
+  restartAutoRefresh(document.getElementById('sheet-id-input').value.trim());
+});
+
+async function boot(sheetId, opts = {}) {
+  const { fit = true, silent = false } = opts;
+  let loadedOk = true;
   if (sheetId) {
     try {
-      hideBanner();
-      DATA = await loadFromSheet(sheetId);
+      if (!silent) hideBanner();
+      const fresh = await loadFromSheet(sheetId);
+      DATA = fresh;
       localStorage.setItem('esd_sheet_id', sheetId);
     } catch (err) {
       console.error(err);
-      showBanner('โหลดจาก Google Sheets ไม่สำเร็จ (ตรวจสอบว่า Sheet ID ถูกต้อง และตั้งค่าแชร์เป็น "ทุกคนที่มีลิงก์ดูได้") — กำลังแสดงข้อมูลตัวอย่างแทน');
-      DATA = DEMO;
+      loadedOk = false;
+      if (silent) {
+        console.warn('auto-refresh failed, keeping previously loaded data');
+      } else {
+        showBanner('โหลดจาก Google Sheets ไม่สำเร็จ (ตรวจสอบว่า Sheet ID ถูกต้อง และตั้งค่าแชร์เป็น "ทุกคนที่มีลิงก์ดูได้") — กำลังแสดงข้อมูลตัวอย่างแทน');
+        DATA = DEMO;
+      }
     }
   } else {
-    showBanner('ยังไม่ได้ตั้งค่า Google Sheet — กำลังแสดงข้อมูลตัวอย่าง (demo) เพื่อทดสอบ');
+    if (!silent) showBanner('ยังไม่ได้ตั้งค่า Google Sheet — กำลังแสดงข้อมูลตัวอย่าง (demo) เพื่อทดสอบ');
     DATA = DEMO;
   }
-  STANDARDS_INDEX = buildStandardsIndex(DATA.standards);
-  populateDynamicFilters();
-  renderAll();
+  if (loadedOk || !silent) {
+    STANDARDS_INDEX = buildStandardsIndex(DATA.standards);
+    populateDynamicFilters();
+    renderAll(fit);
+    lastLoadedAt = new Date();
+    updateLastUpdatedLabel();
+  }
+  restartAutoRefresh(sheetId);
 }
 
 document.getElementById('load-btn').addEventListener('click', () => {
