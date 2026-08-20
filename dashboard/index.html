@@ -4,6 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Environmental Sample Dashboard — v0.1 alpha</title>
+<script>
+// Applied before first paint so switching pages/reloading doesn't flash the wrong theme.
+(function () {
+  try {
+    var saved = localStorage.getItem('esd_theme');
+    if (saved === 'dark' || saved === 'light') document.documentElement.setAttribute('data-theme', saved);
+  } catch (e) {}
+})();
+</script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
   integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
 <style>
@@ -42,6 +51,23 @@
       --status-none:    #898781;
       --series-source:  #9085e9;
     }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --surface-2:      #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --gridline:       #2c2c2a;
+    --border:         rgba(255,255,255,0.10);
+    --series-water:   #3987e5;
+    --series-soil:    #d95926;
+    --series-air:     #199e70;
+    --status-good:    #0ca30c;
+    --status-critical:#e66767;
+    --status-none:    #898781;
+    --series-source:  #9085e9;
   }
   * { box-sizing: border-box; }
   body {
@@ -205,6 +231,7 @@
     <input type="text" id="sheet-id-input" placeholder="วาง Google Sheet ID ที่นี่ (เว้นว่าง = ใช้ข้อมูลตัวอย่าง)">
     <button id="load-btn">โหลดข้อมูล</button>
     <button class="secondary" id="demo-btn">ใช้ข้อมูลตัวอย่าง</button>
+    <button class="secondary" id="theme-toggle-btn" type="button">🌙 โหมดมืด</button>
   </div>
 </header>
 <div id="status-banner"></div>
@@ -1241,6 +1268,25 @@ document.getElementById('demo-btn').addEventListener('click', () => {
   localStorage.removeItem('esd_sheet_id');
   boot('');
 });
+
+// --- theme toggle -----------------------------------------------------
+
+function isDarkActive() {
+  const explicit = document.documentElement.getAttribute('data-theme');
+  if (explicit === 'dark') return true;
+  if (explicit === 'light') return false;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+function syncThemeButtonLabel() {
+  document.getElementById('theme-toggle-btn').textContent = isDarkActive() ? '☀️ โหมดสว่าง' : '🌙 โหมดมืด';
+}
+document.getElementById('theme-toggle-btn').addEventListener('click', () => {
+  const next = isDarkActive() ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  localStorage.setItem('esd_theme', next);
+  syncThemeButtonLabel();
+});
+syncThemeButtonLabel();
 
 initMap();
 const savedId = localStorage.getItem('esd_sheet_id') || '';
