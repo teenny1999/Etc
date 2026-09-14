@@ -17,9 +17,19 @@ Object detection baseline สำหรับหาตำแหน่ง (boundin
   - `categories` มี 2 entry: `id=0` (`"none"`, placeholder ที่ Roboflow ใส่มาให้อัตโนมัติ ไม่ได้ใช้จริง)
     และ `id=1` (`"dumping-sites"`, ตัวจริงที่ annotation ทั้งหมดอ้างถึง)
 
-## วิธีใช้
+## วิธีใช้ (ทางลัด — เร็วสุด)
 1. ดาวน์โหลด dataset (format: **COCO**, เลือก "download zip to computer") จากลิงก์ด้านบน
-2. แตกไฟล์ zip ให้ได้โครงสร้าง:
+   — **ไม่ต้องแตกไฟล์เอง**
+2. รันคำสั่งเดียว:
+   ```
+   bash quickstart.sh /path/to/aerial-dumping-sites.zip
+   ```
+   สคริปต์จะจัดการให้ครบ: ติดตั้งไลบรารี → แตกไฟล์ zip ให้ถูกโครงสร้าง → เช็คว่ามี GPU
+   ไหม → เริ่มเทรนทันที (log บันทึกไว้ที่ `train.log` ด้วย)
+3. ได้โมเดล `dumping_sites_fasterrcnn.pt` เมื่อเทรนเสร็จ
+
+## วิธีใช้ (แบบละเอียด/ปรับเองทีละขั้น)
+1. ดาวน์โหลด dataset ตามข้อ 1 ด้านบน แล้วแตกไฟล์ zip ให้ได้โครงสร้าง:
    ```
    aerial-dumping-sites/
      ├── train/
@@ -29,17 +39,22 @@ Object detection baseline สำหรับหาตำแหน่ง (boundin
          ├── _annotations.coco.json
          └── *.jpg
    ```
-3. ติดตั้งไลบรารี: `pip install -r requirements.txt --break-system-packages`
-4. รัน: `python train_detector.py --data-dir /path/to/aerial-dumping-sites`
+2. ติดตั้งไลบรารี: `pip install -r requirements.txt --break-system-packages`
+3. รัน: `python train_detector.py --data-dir /path/to/aerial-dumping-sites --epochs 5`
+   (ปรับ `--epochs`, `--lr`, `--batch-size` ได้ตามต้องการ ดู `--help`)
 
 ## สถานะปัจจุบัน
 - ✅ ดาวน์โหลดข้อมูลจริงมาทดสอบแล้ว (ผู้ใช้อัปโหลดผ่าน Google Drive) ตรวจสอบโครงสร้าง COCO
   ตรงตามที่คาดไว้ทุกจุด (field names, category id, จำนวนภาพ/annotation)
-- ✅ รัน `train_detector.py` กับข้อมูลจริงจริงแล้ว (smoke test: 4 ภาพ, 1 epoch, CPU) —
+- ✅ รัน `train_detector.py` กับข้อมูลจริงแล้ว (smoke test: 4 ภาพ, 1 epoch, CPU) —
   pipeline ทำงานถูกต้องครบ (โหลดข้อมูล → forward/backward → บันทึกโมเดล → evaluate)
   ไม่มี error ทาง syntax/logic
-- ยังไม่เคย train เต็มรูปแบบ (ทุกภาพ, หลาย epoch) — Faster R-CNN ค่อนข้างหนัก
-  แนะนำให้รันบน GPU (เช่น Google Colab) ไม่ใช่ CPU เพราะจะช้ามาก
+- ✅ ทดสอบ `quickstart.sh` แบบ end-to-end แล้วด้วยข้อมูลย่อย (4 train + 2 valid ภาพ,
+  5 epochs เต็ม) — ติดตั้ง/แตกไฟล์/เช็ค GPU/เทรน/บันทึกโมเดล ทำงานถูกต้องหมด
+  (loss ลดลงต่อเนื่องจริง 1.03 → 0.63 ตลอด 5 epochs ยืนยันว่าโมเดล "เรียนรู้" ได้จริง)
+- **จับเวลาจริงบนเครื่องนี้ (CPU, ไม่มี GPU): ~5.78 วินาที/ภาพ** → เทรนเต็ม 1,492 ภาพ
+  5 epochs ใช้เวลาประมาณ **12 ชั่วโมง** — ถ้ามี GPU (แม้แค่การ์ดจอโน้ตบุ๊กทั่วไป) จะเร็วกว่านี้มาก
+  แนะนำให้รันบนเครื่องที่มี GPU หรือ Google Colab แทนการรันบน CPU ล้วน
 
 ## หมายเหตุเรื่องการประเมินผล
 `evaluate_simple()` ในสคริปต์เป็นการเช็ค sanity แบบง่าย (เทียบจำนวนกล่องที่ทำนายกับจำนวนกล่องจริง)

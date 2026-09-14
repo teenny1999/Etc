@@ -1,3 +1,4 @@
 aerial-dumping-sites/
 *.pt
 __pycache__/
+train.log
