@@ -1,0 +1,5 @@
+aerialwaste/
+tests/_synthetic_data/
+tests/_synthetic_model.pt
+*.pt
+__pycache__/
