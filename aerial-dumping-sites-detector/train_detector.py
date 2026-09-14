@@ -59,6 +59,8 @@ def parse_args():
     parser.add_argument("--limit", type=int, default=None,
                          help="จำกัดจำนวนภาพต่อ split ไว้ smoke-test ให้เร็วขึ้น")
     parser.add_argument("--output", type=Path, default=Path("dumping_sites_fasterrcnn.pt"))
+    parser.add_argument("--resume", type=Path, default=None,
+                         help="path ไปยัง checkpoint (.pt) ที่จะโหลดมาเทรนต่อ")
     return parser.parse_args()
 
 
@@ -201,14 +203,22 @@ def main():
 
     print("กำลังสร้างโมเดล (Faster R-CNN ResNet50-FPN pretrained)...")
     model = build_model(device)
+    if args.resume is not None:
+        print(f"โหลด checkpoint ต่อจาก: {args.resume}")
+        model.load_state_dict(torch.load(args.resume, map_location=device))
 
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.Adam(params, lr=args.lr)
+
+    checkpoint_path = args.output.with_name(args.output.stem + "_checkpoint" + args.output.suffix)
 
     print("เริ่ม fine-tune...")
     for epoch in range(1, args.epochs + 1):
         train_loss = train_one_epoch(model, train_loader, optimizer, device)
         print(f"Epoch {epoch}/{args.epochs} — loss: {train_loss:.4f}")
+        # เซฟทุก epoch กันไว้เผื่อโดนขัดจังหวะ (long-running job อาจรันไม่จบในครั้งเดียว)
+        torch.save(model.state_dict(), checkpoint_path)
+        print(f"  (บันทึก checkpoint ล่าสุดไว้ที่ {checkpoint_path})")
 
     evaluate_simple(model, valid_loader, device)
 

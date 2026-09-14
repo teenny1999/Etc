@@ -18,6 +18,15 @@ Remote Sensing กับ AI Learning" เป็นส่วนเสริมข
   bounding box) ใช้ dataset "Aerial-Dumping-Sites" จาก Roboflow Universe แทน
   เพราะดาวน์โหลด/ทดสอบโค้ดกับข้อมูลจริงสำเร็จแล้ว **นี่คืองานหลักที่ต้องทำต่อ**
 
+## อัปเดต: กำลังเทรนเต็มรูปแบบอยู่บน sandbox คลาวด์ตอนนี้
+เริ่ม `train_detector.py --epochs 5` กับข้อมูลทั้งหมด (1,492 train / 63 valid) บน CPU
+ไปแล้วระหว่างรอผู้ใช้กลับไปที่เครื่องที่มี GPU — **ไม่ต้องรอให้จบก่อนค่อยเริ่มทำต่อบนเครื่องนี้**
+เพราะบน CPU ใช้เวลา ~12 ชั่วโมง (ช้ากว่า GPU มาก) ให้เช็คก่อนว่ามีผลลัพธ์อะไรส่งมาจาก
+sandbox บ้างไหม (ไฟล์ `dumping_sites_fasterrcnn_checkpoint.pt` หรือ
+`dumping_sites_fasterrcnn.pt`) ถ้ามีให้เอามาโหลดต่อด้วย `--resume path/to/checkpoint.pt`
+แทนการเริ่มจาก pretrained ImageNet ใหม่ทั้งหมด — ถ้าไม่มี (sandbox ถูกเคลียร์ก่อนบันทึกไฟล์
+ออกมาได้) ก็เริ่มเทรนใหม่ตามขั้นตอนด้านล่างได้เลยตามปกติ ไม่เสียหายอะไร
+
 ## สถานะปัจจุบันของ `aerial-dumping-sites-detector/`
 - เขียน `train_detector.py` (fine-tune Faster R-CNN ResNet50-FPN v2 pretrained
   ให้ตรวจจับ class เดียว "dumping-sites") เสร็จแล้ว
