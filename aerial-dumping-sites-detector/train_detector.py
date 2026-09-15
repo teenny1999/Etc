@@ -205,7 +205,7 @@ def main():
     model = build_model(device)
     if args.resume is not None:
         print(f"โหลด checkpoint ต่อจาก: {args.resume}")
-        model.load_state_dict(torch.load(args.resume, map_location=device))
+        model.load_state_dict(torch.load(args.resume, map_location=device, weights_only=True))
 
     params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.Adam(params, lr=args.lr)

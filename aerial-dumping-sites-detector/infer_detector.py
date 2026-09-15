@@ -39,7 +39,7 @@ def load_model(model_path, device):
     model = torchvision.models.detection.fasterrcnn_resnet50_fpn_v2(weights=None)
     in_features = model.roi_heads.box_predictor.cls_score.in_features
     model.roi_heads.box_predictor = FastRCNNPredictor(in_features, NUM_CLASSES)
-    model.load_state_dict(torch.load(model_path, map_location=device))
+    model.load_state_dict(torch.load(model_path, map_location=device, weights_only=True))
     model.to(device)
     model.eval()
     return model
