@@ -1,0 +1,46 @@
+name: Build Windows executable
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches:
+      - claude/zen-mendel-gilkxh
+    paths:
+      - "count_buildings_msft.py"
+      - ".github/workflows/build-windows-exe.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install PyInstaller
+        run: pip install pyinstaller
+
+      - name: Build single-file executable
+        run: pyinstaller --onefile --console --name count_buildings_msft count_buildings_msft.py
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: count_buildings_msft-windows
+          path: dist/count_buildings_msft.exe
+
+      - name: Publish as a GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: windows-build-${{ github.run_number }}
+          name: count_buildings_msft.exe (build ${{ github.run_number }})
+          files: dist/count_buildings_msft.exe
+          body: |
+            Portable Windows build of `count_buildings_msft.py`, produced automatically by this workflow.
+            Double-click `count_buildings_msft.exe` to run it interactively, or use it from the command line:
+            `count_buildings_msft.exe <lat> <lon> --radius 2000`

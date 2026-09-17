@@ -41,6 +41,7 @@ DEFAULT_DATASET_LINKS_URL = (
     "https://bfppub.blob.core.windows.net/%24web/2026-08-13/dataset-links.csv"
 )
 DEFAULT_RADIUS_M = 2000
+DEFAULT_CACHE_DIR = ".msft_buildings_cache"
 ZOOM = 9  # tile zoom level used by the dataset's quadkey partitioning
 EARTH_RADIUS_M = 6371000.0
 HTTP_TIMEOUT_S = 60
@@ -227,7 +228,122 @@ def polygon_centroid(geometry: dict) -> tuple[float, float] | None:
     return sum_lat / n, sum_lon / n
 
 
-def main() -> None:
+def run(
+    lat: float,
+    lon: float,
+    radius: int,
+    cache_dir: str,
+    dataset_links_url: str,
+) -> int:
+    """Runs one count and returns the total building count."""
+    os.makedirs(cache_dir, exist_ok=True)
+    os.makedirs(os.path.join(cache_dir, "tiles"), exist_ok=True)
+
+    quadkeys = quadkeys_covering_circle(lat, lon, radius)
+    print(
+        f"Center ({lat}, {lon}), radius {radius} m -> "
+        f"{len(quadkeys)} tile(s): {', '.join(quadkeys)}",
+        file=sys.stderr,
+    )
+
+    try:
+        links_path = load_dataset_links(dataset_links_url, cache_dir)
+    except (urllib.error.URLError, urllib.error.HTTPError) as exc:
+        print(f"error: failed to download dataset-links.csv: {exc}", file=sys.stderr)
+        print(
+            "The dataset URL may have moved - check the README at "
+            "https://github.com/microsoft/GlobalMLBuildingFootprints for the "
+            "current link and pass it with --dataset-links-url.",
+            file=sys.stderr,
+        )
+        raise
+
+    tile_urls = find_tile_urls(links_path, set(quadkeys))
+    if not tile_urls:
+        print("No dataset coverage found for this location.")
+        print(f"lat: {lat}")
+        print(f"lon: {lon}")
+        print(f"radius_m: {radius}")
+        print("building_count: 0")
+        return 0
+
+    total_matched = 0
+    total_seen = 0
+    for location, url in tile_urls:
+        tile_path = cache_path_for_url(cache_dir, url)
+        label = f"{location} ({os.path.basename(url)})"
+        try:
+            download(url, tile_path, label)
+        except (urllib.error.URLError, urllib.error.HTTPError) as exc:
+            print(f"[warn] failed to download {label}: {exc}", file=sys.stderr)
+            continue
+        matched, seen = count_buildings_in_tile(tile_path, lat, lon, radius)
+        total_matched += matched
+        total_seen += seen
+        print(
+            f"[scan] {label}: {matched:,} of {seen:,} buildings within radius",
+            file=sys.stderr,
+        )
+
+    print(f"lat: {lat}")
+    print(f"lon: {lon}")
+    print(f"radius_m: {radius}")
+    print(f"tiles_used: {len(tile_urls)}")
+    print(f"buildings_scanned: {total_seen}")
+    print(f"building_count: {total_matched}")
+    return total_matched
+
+
+def interactive_session() -> None:
+    print("=== นับอาคารจาก Microsoft GlobalMLBuildingFootprints ===")
+    print("ข้อมูล footprint อาจต้องดาวน์โหลดไทล์ขนาดหลายสิบ-หลายร้อย MB ในการค้นหาครั้งแรกของแต่ละพื้นที่")
+    print("พิมพ์ q แล้วกด Enter เพื่อออกจากโปรแกรม\n")
+    while True:
+        try:
+            lat_raw = input("ละติจูด (lat): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+        if lat_raw.lower() in ("q", "quit", "exit"):
+            break
+        try:
+            lat = float(lat_raw)
+        except ValueError:
+            print("กรุณากรอกตัวเลข\n")
+            continue
+
+        try:
+            lon_raw = input("ลองจิจูด (lon): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+        if lon_raw.lower() in ("q", "quit", "exit"):
+            break
+        try:
+            lon = float(lon_raw)
+        except ValueError:
+            print("กรุณากรอกตัวเลข\n")
+            continue
+
+        try:
+            radius_raw = input(f"รัศมี (เมตร) [ค่าเริ่มต้น {DEFAULT_RADIUS_M}]: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            break
+        if radius_raw.lower() in ("q", "quit", "exit"):
+            break
+        try:
+            radius = int(radius_raw) if radius_raw else DEFAULT_RADIUS_M
+        except ValueError:
+            print("รัศมีต้องเป็นตัวเลข\n")
+            continue
+
+        print()
+        try:
+            run(lat, lon, radius, DEFAULT_CACHE_DIR, DEFAULT_DATASET_LINKS_URL)
+        except Exception as exc:  # noqa: BLE001 - keep the window open on any failure
+            print(f"เกิดข้อผิดพลาด: {exc}")
+        print("\n" + "-" * 60 + "\n")
+
+
+def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Count buildings within a radius of a coordinate using Microsoft's "
@@ -244,8 +360,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--cache-dir",
-        default=".msft_buildings_cache",
-        help="Where to cache dataset-links.csv and downloaded tiles (default: ./.msft_buildings_cache)",
+        default=DEFAULT_CACHE_DIR,
+        help=f"Where to cache dataset-links.csv and downloaded tiles (default: ./{DEFAULT_CACHE_DIR})",
     )
     parser.add_argument(
         "--dataset-links-url",
@@ -255,65 +371,37 @@ def main() -> None:
             "(check https://github.com/microsoft/GlobalMLBuildingFootprints for the current link)."
         ),
     )
-    args = parser.parse_args()
+    return parser.parse_args()
 
-    os.makedirs(args.cache_dir, exist_ok=True)
-    os.makedirs(os.path.join(args.cache_dir, "tiles"), exist_ok=True)
 
-    quadkeys = quadkeys_covering_circle(args.lat, args.lon, args.radius)
-    print(
-        f"Center ({args.lat}, {args.lon}), radius {args.radius} m -> "
-        f"{len(quadkeys)} tile(s): {', '.join(quadkeys)}",
-        file=sys.stderr,
-    )
+def main() -> None:
+    # Windows consoles opened by double-clicking a packaged .exe can default
+    # to a legacy codepage that can't render Thai text; force UTF-8 output
+    # so prompts and results never crash the console.
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name)
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
 
-    try:
-        links_path = load_dataset_links(args.dataset_links_url, args.cache_dir)
-    except (urllib.error.URLError, urllib.error.HTTPError) as exc:
-        print(f"error: failed to download dataset-links.csv: {exc}", file=sys.stderr)
-        print(
-            "The dataset URL may have moved - check the README at "
-            "https://github.com/microsoft/GlobalMLBuildingFootprints and pass "
-            "--dataset-links-url with the current link.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
-
-    tile_urls = find_tile_urls(links_path, set(quadkeys))
-    if not tile_urls:
-        print("No dataset coverage found for this location.")
-        print(f"lat: {args.lat}")
-        print(f"lon: {args.lon}")
-        print(f"radius_m: {args.radius}")
-        print("building_count: 0")
+    if len(sys.argv) == 1:
+        # No arguments: most likely launched by double-clicking the packaged
+        # executable rather than from a terminal, so run interactively and
+        # keep the console open instead of exiting after an argparse error.
+        try:
+            interactive_session()
+        except Exception as exc:  # noqa: BLE001 - always show the error, never vanish
+            print(f"เกิดข้อผิดพลาดที่ไม่คาดคิด: {exc}")
+        try:
+            input("\nกด Enter เพื่อปิดหน้าต่าง...")
+        except (EOFError, KeyboardInterrupt):
+            pass
         return
 
-    total_matched = 0
-    total_seen = 0
-    for location, url in tile_urls:
-        tile_path = cache_path_for_url(args.cache_dir, url)
-        label = f"{location} ({os.path.basename(url)})"
-        try:
-            download(url, tile_path, label)
-        except (urllib.error.URLError, urllib.error.HTTPError) as exc:
-            print(f"[warn] failed to download {label}: {exc}", file=sys.stderr)
-            continue
-        matched, seen = count_buildings_in_tile(
-            tile_path, args.lat, args.lon, args.radius
-        )
-        total_matched += matched
-        total_seen += seen
-        print(
-            f"[scan] {label}: {matched:,} of {seen:,} buildings within radius",
-            file=sys.stderr,
-        )
-
-    print(f"lat: {args.lat}")
-    print(f"lon: {args.lon}")
-    print(f"radius_m: {args.radius}")
-    print(f"tiles_used: {len(tile_urls)}")
-    print(f"buildings_scanned: {total_seen}")
-    print(f"building_count: {total_matched}")
+    args = parse_args()
+    run(args.lat, args.lon, args.radius, args.cache_dir, args.dataset_links_url)
 
 
 if __name__ == "__main__":
