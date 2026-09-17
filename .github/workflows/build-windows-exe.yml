@@ -7,6 +7,7 @@ on:
       - claude/zen-mendel-gilkxh
     paths:
       - "count_buildings_msft.py"
+      - "count_buildings_msft_gui.py"
       - ".github/workflows/build-windows-exe.yml"
 
 permissions:
@@ -22,25 +23,36 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install PyInstaller
-        run: pip install pyinstaller
+      - name: Install build dependencies
+        run: pip install pyinstaller pillow
 
-      - name: Build single-file executable
+      - name: Build console executable (CLI / interactive prompt)
         run: pyinstaller --onefile --console --name count_buildings_msft count_buildings_msft.py
 
-      - name: Upload build artifact
+      - name: Build windowed GUI executable
+        run: pyinstaller --onefile --windowed --name count_buildings_msft_gui count_buildings_msft_gui.py
+
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
           name: count_buildings_msft-windows
-          path: dist/count_buildings_msft.exe
+          path: |
+            dist/count_buildings_msft.exe
+            dist/count_buildings_msft_gui.exe
 
       - name: Publish as a GitHub release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: windows-build-${{ github.run_number }}
-          name: count_buildings_msft.exe (build ${{ github.run_number }})
-          files: dist/count_buildings_msft.exe
+          name: count_buildings_msft builds (build ${{ github.run_number }})
+          files: |
+            dist/count_buildings_msft.exe
+            dist/count_buildings_msft_gui.exe
           body: |
-            Portable Windows build of `count_buildings_msft.py`, produced automatically by this workflow.
-            Double-click `count_buildings_msft.exe` to run it interactively, or use it from the command line:
-            `count_buildings_msft.exe <lat> <lon> --radius 2000`
+            Portable Windows builds, produced automatically by this workflow.
+
+            - `count_buildings_msft_gui.exe` - desktop app: enter lat/lon/radius, see the
+              building count and a preview map with a marker + radius circle.
+            - `count_buildings_msft.exe` - console tool: double-click for an interactive
+              prompt, or run from the command line:
+              `count_buildings_msft.exe <lat> <lon> --radius 2000`
