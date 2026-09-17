@@ -185,15 +185,21 @@ class App:
 
         ttk.Label(form, text="ละติจูด (lat):").grid(row=0, column=0, sticky="w")
         self.lat_var = tk.StringVar(value="13.7563")
-        ttk.Entry(form, textvariable=self.lat_var, width=16).grid(row=0, column=1, padx=(4, 16))
+        lat_entry = ttk.Entry(form, textvariable=self.lat_var, width=16)
+        lat_entry.grid(row=0, column=1, padx=(4, 16))
+        self._install_context_menu(lat_entry, editable=True)
 
         ttk.Label(form, text="ลองจิจูด (lon):").grid(row=0, column=2, sticky="w")
         self.lon_var = tk.StringVar(value="100.5018")
-        ttk.Entry(form, textvariable=self.lon_var, width=16).grid(row=0, column=3, padx=(4, 16))
+        lon_entry = ttk.Entry(form, textvariable=self.lon_var, width=16)
+        lon_entry.grid(row=0, column=3, padx=(4, 16))
+        self._install_context_menu(lon_entry, editable=True)
 
         ttk.Label(form, text="รัศมี (เมตร):").grid(row=0, column=4, sticky="w")
         self.radius_var = tk.StringVar(value=str(DEFAULT_RADIUS_M))
-        ttk.Entry(form, textvariable=self.radius_var, width=10).grid(row=0, column=5, padx=(4, 16))
+        radius_entry = ttk.Entry(form, textvariable=self.radius_var, width=10)
+        radius_entry.grid(row=0, column=5, padx=(4, 16))
+        self._install_context_menu(radius_entry, editable=True)
 
         self.run_button = ttk.Button(form, text="ค้นหา", command=self.on_search)
         self.run_button.grid(row=0, column=6, padx=(0, 4))
@@ -218,37 +224,101 @@ class App:
         right = ttk.Frame(body)
         right.pack(side="left", fill="both", expand=True)
 
-        result_frame = ttk.LabelFrame(right, text="ผลลัพธ์")
+        result_frame = ttk.LabelFrame(right, text="ผลลัพธ์ (เลือก/คัดลอกได้)")
         result_frame.pack(side="top", fill="x")
         self.result_var = tk.StringVar(value="-")
-        ttk.Label(
-            result_frame, textvariable=self.result_var, font=("TkDefaultFont", 20, "bold")
-        ).pack(anchor="w", padx=8, pady=(6, 0))
-        self.result_meta_var = tk.StringVar(value="")
-        ttk.Label(result_frame, textvariable=self.result_meta_var, foreground="#555").pack(
-            anchor="w", padx=8, pady=(0, 6)
+        result_entry = tk.Entry(
+            result_frame,
+            textvariable=self.result_var,
+            font=("TkDefaultFont", 20, "bold"),
+            state="readonly",
+            relief="flat",
+            borderwidth=0,
         )
+        result_entry.pack(anchor="w", fill="x", padx=8, pady=(6, 0))
+        self._install_context_menu(result_entry, editable=False)
 
-        log_frame = ttk.LabelFrame(right, text="สถานะการทำงาน")
+        self.result_meta_var = tk.StringVar(value="")
+        meta_entry = tk.Entry(
+            result_frame,
+            textvariable=self.result_meta_var,
+            foreground="#555",
+            state="readonly",
+            relief="flat",
+            borderwidth=0,
+        )
+        meta_entry.pack(anchor="w", fill="x", padx=8, pady=(0, 6))
+        self._install_context_menu(meta_entry, editable=False)
+
+        log_frame = ttk.LabelFrame(right, text="สถานะการทำงาน (เลือก/คัดลอกได้)")
         log_frame.pack(side="top", fill="both", expand=True, pady=(8, 0))
-        self.log_text = tk.Text(log_frame, height=14, wrap="word", state="disabled")
+        self.log_text = tk.Text(log_frame, height=14, wrap="word", undo=False)
         self.log_text.pack(side="left", fill="both", expand=True, padx=(4, 0), pady=4)
         log_scroll = ttk.Scrollbar(log_frame, command=self.log_text.yview)
         log_scroll.pack(side="right", fill="y")
         self.log_text.configure(yscrollcommand=log_scroll.set)
+        # Keep the log selectable and copyable, but block typing/pasting
+        # into it so it still behaves like read-only output.
+        self.log_text.bind("<Key>", self._block_text_edit)
+        self.log_text.bind("<<Paste>>", lambda e: "break")
+        self._install_context_menu(self.log_text, editable=False)
+
+    @staticmethod
+    def _block_text_edit(event: tk.Event) -> str | None:
+        ctrl_or_cmd = bool(event.state & 0x4)
+        if ctrl_or_cmd and event.keysym.lower() in ("c", "a"):
+            return None  # allow copy and select-all
+        if event.keysym in (
+            "Left", "Right", "Up", "Down", "Home", "End", "Prior", "Next",
+            "Shift_L", "Shift_R", "Control_L", "Control_R", "Alt_L", "Alt_R",
+        ):
+            return None  # allow navigation/selection
+        return "break"  # block everything else that would edit the text
+
+    def _install_context_menu(self, widget: tk.Widget, editable: bool) -> None:
+        menu = tk.Menu(widget, tearoff=0)
+        menu.add_command(label="คัดลอก (Copy)", command=lambda: self._copy_from(widget))
+        if editable:
+            menu.add_command(label="วาง (Paste)", command=lambda: widget.event_generate("<<Paste>>"))
+            menu.add_command(label="ตัด (Cut)", command=lambda: widget.event_generate("<<Cut>>"))
+        menu.add_command(label="เลือกทั้งหมด (Select All)", command=lambda: self._select_all(widget))
+
+        def show_menu(event: tk.Event) -> None:
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+
+        widget.bind("<Button-3>", show_menu)
+
+    def _copy_from(self, widget: tk.Widget) -> None:
+        try:
+            if isinstance(widget, tk.Text):
+                text = widget.get("sel.first", "sel.last")
+            else:
+                text = widget.selection_get()
+        except tk.TclError:
+            return
+        self.root.clipboard_clear()
+        self.root.clipboard_append(text)
+
+    @staticmethod
+    def _select_all(widget: tk.Widget) -> None:
+        if isinstance(widget, tk.Text):
+            widget.tag_add("sel", "1.0", "end")
+        elif isinstance(widget, (tk.Entry, ttk.Entry)):
+            widget.selection_range(0, "end")
 
     def _append_log(self, text: str) -> None:
         # Progress lines from count_buildings_msft use \r to overwrite the
         # current line like a terminal would; a Text widget doesn't do that
         # on its own, so emulate it by erasing back to the line start.
-        self.log_text.configure(state="normal")
         for i, part in enumerate(text.split("\r")):
             if i > 0:
                 self.log_text.delete("end-1c linestart", "end-1c")
             if part:
                 self.log_text.insert("end", part)
         self.log_text.see("end")
-        self.log_text.configure(state="disabled")
 
     def _validated_inputs(self) -> tuple[float, float, int] | None:
         try:
@@ -286,9 +356,7 @@ class App:
         self.status_var.set("กำลังค้นหา...")
         self.result_var.set("-")
         self.result_meta_var.set("")
-        self.log_text.configure(state="normal")
         self.log_text.delete("1.0", "end")
-        self.log_text.configure(state="disabled")
 
         self.worker_thread = threading.Thread(
             target=self._worker, args=(lat, lon, radius), daemon=True
