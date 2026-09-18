@@ -162,4 +162,6 @@ https://docs.google.com/spreadsheets/d/1AbCdEfGhIjKlMnOpQrStUvWxYz/edit
 ```
 dashboard/index.html      ตัว dashboard (ไฟล์เดียว เปิดตรงในเบราว์เซอร์ได้)
 sheets-template/*.csv     เทมเพลตหัวคอลัมน์ + ตัวอย่างข้อมูล สำหรับสร้าง Google Sheet
+groundwater/               เครื่องมือหาบ่อน้ำบาดาลรอบจุดประเมิน (ดึงข้อมูลจริงจากเว็บกรมทรัพยากร
+                            น้ำบาดาล) — ดูวิธีใช้ที่ groundwater/README.md
 ```
