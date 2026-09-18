@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>บ่อน้ำบาดาลรอบจุดประเมิน</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --bg: #f5f7f6;
+    --panel: #ffffff;
+    --text: #1b2621;
+    --muted: #5b6b63;
+    --border: #dfe7e2;
+    --accent: #1f7a4d;
+    --accent-fg: #ffffff;
+    --input-bg: #ffffff;
+    --danger: #c0392b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121815;
+      --panel: #1b231e;
+      --text: #e8efe9;
+      --muted: #9db3a6;
+      --border: #2b3830;
+      --accent: #4fd08a;
+      --accent-fg: #0c130f;
+      --input-bg: #10160f;
+      --danger: #ff6b5e;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", "Noto Sans Thai", Tahoma, sans-serif;
+  }
+  header {
+    padding: 12px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+  }
+  header h1 { margin: 0; font-size: 1.15rem; }
+  header p { margin: 2px 0 0; color: var(--muted); font-size: 0.85rem; }
+  .layout {
+    display: grid;
+    grid-template-columns: 340px minmax(0, 1fr);
+    gap: 14px;
+    padding: 14px;
+    align-items: start;
+  }
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+  }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px;
+  }
+  .panel + .panel { margin-top: 14px; }
+  label { display: block; font-size: 0.82rem; color: var(--muted); margin: 10px 0 4px; }
+  label:first-of-type { margin-top: 0; }
+  select, input[type="text"], input[type="number"] {
+    width: 100%;
+    padding: 7px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--input-bg);
+    color: var(--text);
+    font-size: 0.9rem;
+  }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  button {
+    cursor: pointer;
+    border: none;
+    border-radius: 6px;
+    padding: 9px 14px;
+    font-size: 0.9rem;
+    background: var(--accent);
+    color: var(--accent-fg);
+    font-weight: 600;
+  }
+  button.secondary {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-weight: 500;
+  }
+  button:disabled { opacity: 0.55; cursor: default; }
+  .full-btn { width: 100%; margin-top: 12px; }
+  #status-line { font-size: 0.82rem; color: var(--muted); margin-top: 8px; min-height: 1.2em; }
+  #status-line.err { color: var(--danger); }
+  #map {
+    height: calc(100vh - 110px);
+    min-height: 460px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+  }
+  .hint { font-size: 0.78rem; color: var(--muted); line-height: 1.5; margin-top: 4px; }
+  .summary { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+  .chip {
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-size: 0.8rem;
+    border: 1px solid var(--border);
+  }
+  .table-wrap { max-height: 340px; overflow: auto; margin-top: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+  th, td { padding: 5px 6px; text-align: left; border-bottom: 1px solid var(--border); }
+  th { position: sticky; top: 0; background: var(--panel); }
+  tbody tr:hover { background: rgba(79, 208, 138, 0.1); cursor: pointer; }
+  .band-tag { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 0.72rem; color: #fff; white-space: nowrap; }
+  .divider { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+  .disabled-section { opacity: 0.5; pointer-events: none; }
+</style>
+</head>
+<body>
+<header>
+  <h1>บ่อน้ำบาดาลรอบจุดประเมิน</h1>
+  <p>ข้อมูลจากระบบสืบค้นบ่อน้ำบาดาล กรมทรัพยากรน้ำบาดาล — ระยะทางเป็นเส้นตรง (ไม่ใช่ตามถนน/ทิศทางน้ำใต้ดิน)</p>
+</header>
+<div class="layout">
+  <div>
+    <div class="panel">
+      <label>1) เลือกเขตค้นหา</label>
+      <select id="province"><option value="">กำลังโหลดจังหวัด...</option></select>
+      <div class="row2">
+        <div>
+          <label>อำเภอ (ไม่บังคับ)</label>
+          <select id="amphoe" disabled><option value="">ทั้งจังหวัด</option></select>
+        </div>
+        <div>
+          <label>ตำบล (ไม่บังคับ)</label>
+          <select id="tambon" disabled><option value="">ทั้งอำเภอ</option></select>
+        </div>
+      </div>
+      <div class="hint">
+        แนะนำให้เลือกอำเภอ (หรือตำบล) แคบที่สุดเท่าที่ทำได้ — บางจังหวัดมีบ่อเป็นพันบ่อ
+        การโหลดต้องไล่เปิดทีละหน้าเว็บของกรมฯ ต่อหนึ่งบ่อ ยิ่งแคบยิ่งเร็ว
+      </div>
+      <label>จำนวนบ่อสูงสุดที่จะโหลด</label>
+      <input type="number" id="max-wells" value="500" min="10" max="5000" step="10" />
+      <button class="full-btn" id="load-btn">โหลดข้อมูลบ่อ</button>
+      <div id="status-line"></div>
+    </div>
+
+    <div class="panel disabled-section" id="target-section">
+      <label>2) กำหนดจุดที่จะประเมิน</label>
+      <div class="hint">คลิกบนแผนที่เพื่อปักหมุด หรือกรอกพิกัดเองด้านล่าง</div>
+      <div class="row2" style="margin-top:8px;">
+        <div>
+          <label>ละติจูด (lat)</label>
+          <input type="text" id="lat-input" placeholder="13.7563" />
+        </div>
+        <div>
+          <label>ลองจิจูด (lon)</label>
+          <input type="text" id="lon-input" placeholder="100.5018" />
+        </div>
+      </div>
+      <label>ชื่อจุดอ้างอิง</label>
+      <input type="text" id="site-label" placeholder="เช่น พื้นที่โรงงาน A" value="จุดที่ประเมิน" />
+      <label>วงรัศมี (กม., คั่นด้วย ,)</label>
+      <input type="text" id="radii-input" value="1,3,5,10" />
+      <button class="full-btn secondary" id="apply-btn">ปักหมุด / คำนวณระยะ</button>
+    </div>
+
+    <div class="panel disabled-section" id="results-section">
+      <label>สรุปจำนวนบ่อต่อวง</label>
+      <div class="summary" id="summary"></div>
+      <button class="secondary" id="export-btn" style="width:100%;">ส่งออกตารางเป็น CSV</button>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>กม.</th><th>วง</th><th>รหัสบ่อ</th><th>ที่ตั้ง</th></tr>
+          </thead>
+          <tbody id="wells-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="map"></div>
+</div>
+
+<script>
+const BAND_COLORS = ["#e03131", "#f08c00", "#2f9e44", "#1971c2", "#7048e8", "#c2255c"];
+let ALL_WELLS = [];
+let TARGET = null; // {lat, lon}
+let radii = [1, 3, 5, 10];
+let targetMarker = null;
+let circleLayers = [];
+let wellLayer = L.layerGroup();
+
+const map = L.map("map").setView([13.7563, 100.5018], 6);
+L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 19,
+  attribution: "&copy; OpenStreetMap contributors",
+}).addTo(map);
+wellLayer.addTo(map);
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371.0088;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dphi = toRad(lat2 - lat1);
+  const dl = toRad(lon2 - lon1);
+  const a =
+    Math.sin(dphi / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dl / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+
+function colorForBand(bandKm) {
+  const idx = radii.indexOf(bandKm);
+  return idx === -1 ? "#868e96" : BAND_COLORS[idx % BAND_COLORS.length];
+}
+
+function bucketFor(distanceKm) {
+  const sorted = radii.slice().sort((a, b) => a - b);
+  for (const r of sorted) if (distanceKm <= r) return r;
+  return null;
+}
+
+function setStatus(msg, isErr) {
+  const el = document.getElementById("status-line");
+  el.textContent = msg;
+  el.classList.toggle("err", !!isErr);
+}
+
+async function loadJSON(url) {
+  const res = await fetch(url);
+  const data = await res.json();
+  if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+// ---- dropdowns ----
+async function initProvinces() {
+  try {
+    const list = await loadJSON("/api/provinces");
+    const sel = document.getElementById("province");
+    sel.innerHTML = '<option value="">เลือกจังหวัด</option>' +
+      list.map((p) => `<option value="${p.id}">${p.name}</option>`).join("");
+  } catch (e) {
+    setStatus("โหลดรายชื่อจังหวัดไม่สำเร็จ: " + e.message, true);
+  }
+}
+
+document.getElementById("province").addEventListener("change", async (e) => {
+  const amphoeSel = document.getElementById("amphoe");
+  const tambonSel = document.getElementById("tambon");
+  tambonSel.innerHTML = '<option value="">ทั้งอำเภอ</option>';
+  tambonSel.disabled = true;
+  if (!e.target.value) {
+    amphoeSel.innerHTML = '<option value="">ทั้งจังหวัด</option>';
+    amphoeSel.disabled = true;
+    return;
+  }
+  amphoeSel.disabled = true;
+  amphoeSel.innerHTML = '<option value="">กำลังโหลด...</option>';
+  try {
+    const list = await loadJSON(`/api/amphoes?province=${e.target.value}`);
+    amphoeSel.innerHTML = '<option value="">ทั้งจังหวัด</option>' +
+      list.map((a) => `<option value="${a.id}" data-name="${a.name}">${a.name}</option>`).join("");
+    amphoeSel.disabled = false;
+  } catch (err) {
+    setStatus("โหลดรายชื่ออำเภอไม่สำเร็จ: " + err.message, true);
+  }
+});
+
+document.getElementById("amphoe").addEventListener("change", async (e) => {
+  const tambonSel = document.getElementById("tambon");
+  if (!e.target.value) {
+    tambonSel.innerHTML = '<option value="">ทั้งอำเภอ</option>';
+    tambonSel.disabled = true;
+    return;
+  }
+  tambonSel.disabled = true;
+  tambonSel.innerHTML = '<option value="">กำลังโหลด...</option>';
+  try {
+    const list = await loadJSON(`/api/tambons?amphoe=${e.target.value}`);
+    tambonSel.innerHTML = '<option value="">ทั้งอำเภอ</option>' +
+      list.map((t) => `<option value="${t.id}" data-name="${t.name}">${t.name}</option>`).join("");
+    tambonSel.disabled = false;
+  } catch (err) {
+    setStatus("โหลดรายชื่อตำบลไม่สำเร็จ: " + err.message, true);
+  }
+});
+
+// ---- load wells ----
+let loadTimer = null;
+document.getElementById("load-btn").addEventListener("click", async () => {
+  const provinceId = document.getElementById("province").value;
+  if (!provinceId) {
+    setStatus("กรุณาเลือกจังหวัดก่อน", true);
+    return;
+  }
+  const amphoeSel = document.getElementById("amphoe");
+  const tambonSel = document.getElementById("tambon");
+  const amphoeName = amphoeSel.selectedOptions[0]?.dataset.name || "";
+  const tambonName = tambonSel.selectedOptions[0]?.dataset.name || "";
+  const maxWells = document.getElementById("max-wells").value || "500";
+
+  const btn = document.getElementById("load-btn");
+  btn.disabled = true;
+  let seconds = 0;
+  setStatus("กำลังโหลด... (0 วิ) — ไล่เปิดทีละบ่อจากเว็บกรมฯ อาจใช้เวลาสักครู่");
+  loadTimer = setInterval(() => {
+    seconds += 1;
+    setStatus(`กำลังโหลด... (${seconds} วิ) — ไล่เปิดทีละบ่อจากเว็บกรมฯ อาจใช้เวลาสักครู่`);
+  }, 1000);
+
+  try {
+    const params = new URLSearchParams({
+      province: provinceId,
+      amphoe_name: amphoeName,
+      tambon_name: tambonName,
+      max_wells: maxWells,
+    });
+    const data = await loadJSON(`/api/wells?${params.toString()}`);
+    ALL_WELLS = data.wells;
+    clearInterval(loadTimer);
+    let msg = `โหลดสำเร็จ: ${ALL_WELLS.length} บ่อ (จากทั้งจังหวัด ${data.total_in_province} บ่อ)`;
+    if (data.truncated) msg += ` — ⚠ ผลลัพธ์ตรงตัวกรองมีมากกว่า ${maxWells} บ่อ ตัดมาแค่บางส่วน ลองกรองอำเภอ/ตำบลให้แคบลง`;
+    setStatus(msg);
+    document.getElementById("target-section").classList.remove("disabled-section");
+    document.getElementById("results-section").classList.remove("disabled-section");
+    plotAllWellsNeutral();
+  } catch (e) {
+    clearInterval(loadTimer);
+    setStatus("โหลดข้อมูลไม่สำเร็จ: " + e.message, true);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+function plotAllWellsNeutral() {
+  wellLayer.clearLayers();
+  const pts = [];
+  ALL_WELLS.forEach((w) => {
+    const m = L.circleMarker([w.lat, w.lon], {
+      radius: 4,
+      color: "#fff",
+      weight: 1,
+      fillColor: "#868e96",
+      fillOpacity: 0.8,
+    }).bindPopup(`<b>${w.well_code}</b><br>${w.location_text}`);
+    wellLayer.addLayer(m);
+    pts.push([w.lat, w.lon]);
+  });
+  if (pts.length) map.fitBounds(pts, { padding: [30, 30] });
+}
+
+// ---- target point + radius ----
+map.on("click", (e) => {
+  if (!ALL_WELLS.length) return;
+  setTarget(e.latlng.lat, e.latlng.lng);
+});
+
+function setTarget(lat, lon) {
+  TARGET = { lat, lon };
+  document.getElementById("lat-input").value = lat.toFixed(6);
+  document.getElementById("lon-input").value = lon.toFixed(6);
+  recompute(true);
+}
+
+document.getElementById("apply-btn").addEventListener("click", () => {
+  const lat = parseFloat(document.getElementById("lat-input").value);
+  const lon = parseFloat(document.getElementById("lon-input").value);
+  if (Number.isNaN(lat) || Number.isNaN(lon)) {
+    setStatus("กรอกพิกัด lat/lon ให้ถูกต้องก่อน", true);
+    return;
+  }
+  const parsedRadii = document
+    .getElementById("radii-input")
+    .value.split(",")
+    .map((s) => parseFloat(s.trim()))
+    .filter((n) => !Number.isNaN(n) && n > 0);
+  if (parsedRadii.length) radii = parsedRadii.sort((a, b) => a - b);
+  TARGET = { lat, lon };
+  recompute(true);
+});
+
+function recompute(refit) {
+  if (!TARGET) return;
+  circleLayers.forEach((c) => map.removeLayer(c));
+  circleLayers = [];
+  radii.forEach((r) => {
+    const c = L.circle([TARGET.lat, TARGET.lon], {
+      radius: r * 1000,
+      color: colorForBand(r),
+      weight: 1.5,
+      dashArray: "6 4",
+      fillOpacity: 0.03,
+    }).addTo(map);
+    circleLayers.push(c);
+  });
+
+  if (targetMarker) map.removeLayer(targetMarker);
+  targetMarker = L.marker([TARGET.lat, TARGET.lon], {
+    icon: L.divIcon({
+      className: "",
+      html: '<div style="background:#e03131;width:16px;height:16px;border-radius:50%;border:3px solid white;box-shadow:0 0 4px rgba(0,0,0,.5);"></div>',
+      iconSize: [16, 16],
+      iconAnchor: [8, 8],
+    }),
+  })
+    .addTo(map)
+    .bindPopup(document.getElementById("site-label").value || "จุดที่ประเมิน");
+
+  const maxRadius = Math.max(...radii);
+  const withDist = ALL_WELLS.map((w) => {
+    const d = haversineKm(TARGET.lat, TARGET.lon, w.lat, w.lon);
+    return { ...w, distance_km: d, radius_band_km: bucketFor(d) };
+  })
+    .filter((w) => w.distance_km <= maxRadius)
+    .sort((a, b) => a.distance_km - b.distance_km);
+
+  wellLayer.clearLayers();
+  withDist.forEach((w) => {
+    const color = colorForBand(w.radius_band_km);
+    const m = L.circleMarker([w.lat, w.lon], {
+      radius: 6,
+      color: "#fff",
+      weight: 1,
+      fillColor: color,
+      fillOpacity: 0.9,
+    }).bindPopup(
+      `<b>${w.well_code}</b><br>${w.location_text}<br>ระยะ: ${w.distance_km.toFixed(3)} กม.<br>` +
+        `ลึก: ${w.depth_m ?? "-"} ม. · ปริมาณน้ำ: ${w.yield_m3_per_hr ?? "-"} ม³/ชม.`
+    );
+    wellLayer.addLayer(m);
+  });
+
+  renderSummary(withDist);
+  renderTable(withDist);
+  window.LAST_RESULTS = withDist;
+
+  if (refit) {
+    const bounds = L.latLngBounds([[TARGET.lat, TARGET.lon]]);
+    withDist.forEach((w) => bounds.extend([w.lat, w.lon]));
+    map.fitBounds(bounds.pad(0.15));
+  }
+}
+
+function renderSummary(withDist) {
+  const el = document.getElementById("summary");
+  el.innerHTML = "";
+  const counts = {};
+  radii.forEach((r) => (counts[r] = 0));
+  withDist.forEach((w) => {
+    if (w.radius_band_km != null) counts[w.radius_band_km] += 1;
+  });
+  radii.forEach((r) => {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.style.borderColor = colorForBand(r);
+    chip.textContent = `≤ ${r} กม.: ${counts[r]} บ่อ`;
+    el.appendChild(chip);
+  });
+  const totalChip = document.createElement("span");
+  totalChip.className = "chip";
+  totalChip.textContent = `รวม: ${withDist.length} บ่อ`;
+  el.appendChild(totalChip);
+}
+
+function renderTable(withDist) {
+  const tbody = document.getElementById("wells-tbody");
+  tbody.innerHTML = "";
+  withDist.forEach((w) => {
+    const tr = document.createElement("tr");
+    const color = colorForBand(w.radius_band_km);
+    tr.innerHTML = `
+      <td>${w.distance_km.toFixed(2)}</td>
+      <td><span class="band-tag" style="background:${color}">≤${w.radius_band_km}</span></td>
+      <td>${w.well_code}</td>
+      <td>${w.location_text}</td>
+    `;
+    tr.addEventListener("click", () => map.setView([w.lat, w.lon], 16));
+    tbody.appendChild(tr);
+  });
+}
+
+document.getElementById("export-btn").addEventListener("click", () => {
+  const rows = window.LAST_RESULTS || [];
+  if (!rows.length) return;
+  const header = ["distance_km", "radius_band_km", "well_code", "location_text", "depth_m", "yield_m3_per_hr", "lat", "lon"];
+  const lines = [header.join(",")];
+  rows.forEach((w) => {
+    lines.push(
+      header
+        .map((k) => {
+          const v = w[k] ?? "";
+          const s = String(v).replace(/"/g, '""');
+          return /[,"\n]/.test(s) ? `"${s}"` : s;
+        })
+        .join(",")
+    );
+  });
+  const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "groundwater_wells_by_distance.csv";
+  a.click();
+});
+
+initProvinces();
+</script>
+</body>
+</html>
