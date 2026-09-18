@@ -14,6 +14,8 @@
     --muted: #5b6b63;
     --border: #dfe7e2;
     --accent: #1f7a4d;
+    --accent-fg: #ffffff;
+    --input-bg: #ffffff;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -23,6 +25,8 @@
       --muted: #9db3a6;
       --border: #2b3830;
       --accent: #4fd08a;
+      --accent-fg: #0c130f;
+      --input-bg: #10160f;
     }
   }
   * { box-sizing: border-box; }
@@ -33,191 +37,283 @@
     font-family: "Segoe UI", "Noto Sans Thai", Tahoma, sans-serif;
   }
   header {
-    padding: 16px 20px;
+    padding: 12px 20px;
     border-bottom: 1px solid var(--border);
     background: var(--panel);
   }
-  header h1 { margin: 0 0 4px; font-size: 1.25rem; }
-  header .meta { color: var(--muted); font-size: 0.9rem; }
+  header h1 { margin: 0; font-size: 1.15rem; }
+  header .meta { color: var(--muted); font-size: 0.85rem; margin-top: 2px; }
   .layout {
     display: grid;
-    grid-template-columns: minmax(0, 1.4fr) minmax(300px, 1fr);
-    gap: 16px;
-    padding: 16px;
+    grid-template-columns: 320px minmax(0, 1fr);
+    gap: 14px;
+    padding: 14px;
+    align-items: start;
   }
   @media (max-width: 900px) {
     .layout { grid-template-columns: 1fr; }
-  }
-  #map {
-    height: 70vh;
-    min-height: 420px;
-    border-radius: 10px;
-    border: 1px solid var(--border);
   }
   .panel {
     background: var(--panel);
     border: 1px solid var(--border);
     border-radius: 10px;
-    padding: 12px;
+    padding: 14px;
   }
-  .summary {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 12px;
-  }
-  .chip {
-    border-radius: 999px;
-    padding: 4px 10px;
-    font-size: 0.85rem;
+  .panel + .panel { margin-top: 14px; }
+  label { display: block; font-size: 0.82rem; color: var(--muted); margin: 10px 0 4px; }
+  label:first-of-type { margin-top: 0; }
+  input[type="text"] {
+    width: 100%;
+    padding: 7px 8px;
+    border-radius: 6px;
     border: 1px solid var(--border);
+    background: var(--input-bg);
     color: var(--text);
+    font-size: 0.9rem;
   }
-  table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-  th, td { padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  button {
+    cursor: pointer;
+    border: none;
+    border-radius: 6px;
+    padding: 9px 14px;
+    font-size: 0.9rem;
+    background: var(--accent);
+    color: var(--accent-fg);
+    font-weight: 600;
+  }
+  button.secondary { background: transparent; border: 1px solid var(--border); color: var(--text); font-weight: 500; }
+  .full-btn { width: 100%; margin-top: 12px; }
+  .hint { font-size: 0.78rem; color: var(--muted); line-height: 1.5; margin-top: 6px; }
+  #map {
+    height: calc(100vh - 110px);
+    min-height: 460px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+  }
+  .summary { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+  .chip { border-radius: 999px; padding: 3px 10px; font-size: 0.8rem; border: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+  th, td { padding: 6px 7px; text-align: left; border-bottom: 1px solid var(--border); }
   th { position: sticky; top: 0; background: var(--panel); cursor: pointer; user-select: none; }
   th.sorted::after { content: " \25BE"; color: var(--accent); }
-  tbody tr:hover { background: rgba(79, 208, 138, 0.08); }
-  .band-tag {
-    display: inline-block;
-    padding: 1px 8px;
-    border-radius: 999px;
-    font-size: 0.75rem;
-    color: #fff;
-  }
-  .table-wrap { max-height: 60vh; overflow: auto; }
+  tbody tr:hover { background: rgba(79, 208, 138, 0.1); cursor: pointer; }
+  .band-tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 0.75rem; color: #fff; white-space: nowrap; }
+  .table-wrap { max-height: 45vh; overflow: auto; margin-top: 8px; }
   .empty { color: var(--muted); padding: 16px; text-align: center; }
-  a { color: var(--accent); }
 </style>
 </head>
 <body>
 <header>
-  <h1>บ่อน้ำบาดาลรอบจุดประเมิน — <span id="site-label"></span></h1>
+  <h1>บ่อน้ำบาดาลรอบจุดประเมิน</h1>
   <div class="meta" id="meta-line"></div>
 </header>
 <div class="layout">
+  <div>
+    <div class="panel">
+      <label>กำหนดจุดที่จะประเมิน</label>
+      <div class="hint">คลิกบนแผนที่เพื่อปักหมุด หรือกรอกพิกัดเองด้านล่างแล้วกดปุ่ม — ปรับได้ไม่จำกัดจำนวนครั้ง ไม่ต้องโหลดข้อมูลใหม่</div>
+      <div class="row2" style="margin-top:8px;">
+        <div>
+          <label>ละติจูด (lat)</label>
+          <input type="text" id="lat-input" />
+        </div>
+        <div>
+          <label>ลองจิจูด (lon)</label>
+          <input type="text" id="lon-input" />
+        </div>
+      </div>
+      <label>ชื่อจุดอ้างอิง</label>
+      <input type="text" id="site-label" />
+      <label>วงรัศมี (กม., คั่นด้วย ,)</label>
+      <input type="text" id="radii-input" />
+      <button class="full-btn" id="apply-btn">ปักหมุด / คำนวณระยะ</button>
+    </div>
+
+    <div class="panel">
+      <label>สรุปจำนวนบ่อต่อวง</label>
+      <div class="summary" id="summary"></div>
+      <button class="secondary" id="export-btn" style="width:100%;">ส่งออกตารางเป็น CSV</button>
+    </div>
+  </div>
+
   <div class="panel" style="padding:0;">
     <div id="map"></div>
   </div>
-  <div class="panel">
-    <div class="summary" id="summary"></div>
-    <div class="table-wrap">
-      <table id="wells-table">
-        <thead>
-          <tr>
-            <th data-key="distance_km">ระยะ (กม.)</th>
-            <th data-key="radius_band_km">วง</th>
-            <th data-key="well_code">รหัสบ่อ</th>
-            <th data-key="location_text">ที่ตั้ง</th>
-            <th data-key="depth_m">ลึก (ม.)</th>
-            <th data-key="yield_m3_per_hr">ปริมาณน้ำ (ม³/ชม.)</th>
-          </tr>
-        </thead>
-        <tbody id="wells-tbody"></tbody>
-      </table>
-      <div class="empty" id="empty-msg" style="display:none;">ไม่พบบ่อน้ำบาดาลในระยะที่กำหนด</div>
-    </div>
+</div>
+
+<div class="panel" style="margin:0 14px 14px;">
+  <div class="table-wrap">
+    <table id="wells-table">
+      <thead>
+        <tr>
+          <th data-key="distance_km">ระยะ (กม.)</th>
+          <th data-key="radius_band_km">วง</th>
+          <th data-key="well_code">รหัสบ่อ</th>
+          <th data-key="location_text">ที่ตั้ง</th>
+          <th data-key="depth_m">ลึก (ม.)</th>
+          <th data-key="yield_m3_per_hr">ปริมาณน้ำ (ม³/ชม.)</th>
+        </tr>
+      </thead>
+      <tbody id="wells-tbody"></tbody>
+    </table>
+    <div class="empty" id="empty-msg" style="display:none;">ไม่พบบ่อน้ำบาดาลในระยะที่กำหนด</div>
   </div>
 </div>
 
 <script>
 const DATA = __REPORT_DATA__;
-
 const BAND_COLORS = ["#e03131", "#f08c00", "#2f9e44", "#1971c2", "#7048e8", "#c2255c"];
-function colorForBand(bandKm, radii) {
+
+const ALL_WELLS = DATA.wells.filter((w) => w.lat != null && w.lon != null);
+let radii = DATA.radii_km.slice().sort((a, b) => a - b);
+let TARGET = { lat: DATA.center.lat, lon: DATA.center.lon };
+let LAST_RESULTS = [];
+
+document.getElementById("meta-line").textContent =
+  `ข้อมูลบ่อทั้งหมด ${ALL_WELLS.length} บ่อ · สร้างเมื่อ: ${DATA.generated_at} · แหล่งข้อมูล: ${DATA.source}`;
+document.getElementById("lat-input").value = TARGET.lat.toFixed(6);
+document.getElementById("lon-input").value = TARGET.lon.toFixed(6);
+document.getElementById("site-label").value = DATA.site_label || "จุดที่ประเมิน";
+document.getElementById("radii-input").value = radii.join(",");
+
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371.0088;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dphi = toRad(lat2 - lat1);
+  const dl = toRad(lon2 - lon1);
+  const a = Math.sin(dphi / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dl / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(a));
+}
+function colorForBand(bandKm) {
   const idx = radii.indexOf(bandKm);
-  if (idx === -1) return "#868e96";
-  return BAND_COLORS[idx % BAND_COLORS.length];
+  return idx === -1 ? "#868e96" : BAND_COLORS[idx % BAND_COLORS.length];
+}
+function bucketFor(distanceKm) {
+  for (const r of radii) if (distanceKm <= r) return r;
+  return null;
 }
 
-document.getElementById("site-label").textContent = DATA.site_label || "จุดที่ประเมิน";
-document.getElementById("meta-line").textContent =
-  `พิกัดศูนย์กลาง: ${DATA.center.lat.toFixed(6)}, ${DATA.center.lon.toFixed(6)}  ·  ` +
-  `สร้างเมื่อ: ${DATA.generated_at}  ·  แหล่งข้อมูล: ${DATA.source}`;
-
-const map = L.map("map").setView([DATA.center.lat, DATA.center.lon], 13);
+const map = L.map("map").setView([TARGET.lat, TARGET.lon], 13);
 L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
   maxZoom: 19,
   attribution: "&copy; OpenStreetMap contributors",
 }).addTo(map);
 
-L.marker([DATA.center.lat, DATA.center.lon], {
-  icon: L.divIcon({
-    className: "",
-    html: '<div style="background:#e03131;width:16px;height:16px;border-radius:50%;border:3px solid white;box-shadow:0 0 4px rgba(0,0,0,.5);"></div>',
-    iconSize: [16, 16],
-    iconAnchor: [8, 8],
-  }),
-})
-  .addTo(map)
-  .bindPopup(`<b>${DATA.site_label}</b><br>${DATA.center.lat.toFixed(6)}, ${DATA.center.lon.toFixed(6)}`);
+let targetMarker = null;
+let circleLayers = [];
+const wellLayer = L.layerGroup().addTo(map);
 
-const radii = DATA.radii_km.slice().sort((a, b) => a - b);
-radii.forEach((r, i) => {
-  L.circle([DATA.center.lat, DATA.center.lon], {
-    radius: r * 1000,
-    color: colorForBand(r, radii),
-    weight: 1.5,
-    dashArray: "6 4",
-    fillOpacity: 0.03,
-  })
-    .addTo(map)
-    .bindTooltip(`${r} กม.`, { permanent: false });
-});
+map.on("click", (e) => setTarget(e.latlng.lat, e.latlng.lng, false));
 
-const wellMarkers = [];
-DATA.wells.forEach((w) => {
-  if (w.lat == null || w.lon == null) return;
-  const color = colorForBand(w.radius_band_km, radii);
-  const marker = L.circleMarker([w.lat, w.lon], {
-    radius: 6,
-    color: "#fff",
-    weight: 1,
-    fillColor: color,
-    fillOpacity: 0.9,
-  });
-  marker.bindPopup(
-    `<b>${w.well_code}</b><br>${w.location_text}<br>` +
-      `ระยะ: ${w.distance_km} กม.<br>` +
-      `ลึก: ${w.depth_m ?? "-"} ม. · ปริมาณน้ำ: ${w.yield_m3_per_hr ?? "-"} ม³/ชม.`
-  );
-  marker.addTo(map);
-  wellMarkers.push(marker);
-});
-
-if (wellMarkers.length) {
-  const group = L.featureGroup([...wellMarkers, L.marker([DATA.center.lat, DATA.center.lon])]);
-  map.fitBounds(group.getBounds().pad(0.15));
+function setTarget(lat, lon, refit) {
+  TARGET = { lat, lon };
+  document.getElementById("lat-input").value = lat.toFixed(6);
+  document.getElementById("lon-input").value = lon.toFixed(6);
+  recompute(refit);
 }
 
-// สรุปจำนวนบ่อต่อวง
-const summaryEl = document.getElementById("summary");
-const counts = {};
-radii.forEach((r) => (counts[r] = 0));
-DATA.wells.forEach((w) => {
-  if (w.radius_band_km != null) counts[w.radius_band_km] = (counts[w.radius_band_km] || 0) + 1;
+document.getElementById("apply-btn").addEventListener("click", () => {
+  const lat = parseFloat(document.getElementById("lat-input").value);
+  const lon = parseFloat(document.getElementById("lon-input").value);
+  if (Number.isNaN(lat) || Number.isNaN(lon)) return;
+  const parsedRadii = document
+    .getElementById("radii-input")
+    .value.split(",")
+    .map((s) => parseFloat(s.trim()))
+    .filter((n) => !Number.isNaN(n) && n > 0);
+  if (parsedRadii.length) radii = parsedRadii.sort((a, b) => a - b);
+  setTarget(lat, lon, true);
 });
-let prev = 0;
-radii.forEach((r) => {
-  const chip = document.createElement("span");
-  chip.className = "chip";
-  chip.style.borderColor = colorForBand(r, radii);
-  chip.textContent = `≤ ${r} กม.: ${counts[r] || 0} บ่อ`;
-  summaryEl.appendChild(chip);
-  prev = r;
-});
-const totalChip = document.createElement("span");
-totalChip.className = "chip";
-totalChip.textContent = `รวมทั้งหมด: ${DATA.wells.length} บ่อ`;
-summaryEl.appendChild(totalChip);
 
-// ตาราง
-const tbody = document.getElementById("wells-tbody");
+function recompute(refit) {
+  circleLayers.forEach((c) => map.removeLayer(c));
+  circleLayers = [];
+  radii.forEach((r) => {
+    circleLayers.push(
+      L.circle([TARGET.lat, TARGET.lon], {
+        radius: r * 1000,
+        color: colorForBand(r),
+        weight: 1.5,
+        dashArray: "6 4",
+        fillOpacity: 0.03,
+      }).addTo(map)
+    );
+  });
+
+  if (targetMarker) map.removeLayer(targetMarker);
+  targetMarker = L.marker([TARGET.lat, TARGET.lon], {
+    icon: L.divIcon({
+      className: "",
+      html: '<div style="background:#e03131;width:16px;height:16px;border-radius:50%;border:3px solid white;box-shadow:0 0 4px rgba(0,0,0,.5);"></div>',
+      iconSize: [16, 16],
+      iconAnchor: [8, 8],
+    }),
+  })
+    .addTo(map)
+    .bindPopup(document.getElementById("site-label").value || "จุดที่ประเมิน");
+
+  const maxRadius = Math.max(...radii);
+  LAST_RESULTS = ALL_WELLS.map((w) => {
+    const d = haversineKm(TARGET.lat, TARGET.lon, w.lat, w.lon);
+    return { ...w, distance_km: d, radius_band_km: bucketFor(d) };
+  })
+    .filter((w) => w.distance_km <= maxRadius)
+    .sort((a, b) => a.distance_km - b.distance_km);
+
+  wellLayer.clearLayers();
+  LAST_RESULTS.forEach((w) => {
+    wellLayer.addLayer(
+      L.circleMarker([w.lat, w.lon], {
+        radius: 6,
+        color: "#fff",
+        weight: 1,
+        fillColor: colorForBand(w.radius_band_km),
+        fillOpacity: 0.9,
+      }).bindPopup(
+        `<b>${w.well_code}</b><br>${w.location_text}<br>ระยะ: ${w.distance_km.toFixed(3)} กม.<br>` +
+          `ลึก: ${w.depth_m ?? "-"} ม. · ปริมาณน้ำ: ${w.yield_m3_per_hr ?? "-"} ม³/ชม.`
+      )
+    );
+  });
+
+  renderSummary();
+  renderTable();
+
+  if (refit) {
+    const bounds = L.latLngBounds([[TARGET.lat, TARGET.lon]]);
+    LAST_RESULTS.forEach((w) => bounds.extend([w.lat, w.lon]));
+    map.fitBounds(bounds.pad(0.15));
+  }
+}
+
+function renderSummary() {
+  const el = document.getElementById("summary");
+  el.innerHTML = "";
+  const counts = {};
+  radii.forEach((r) => (counts[r] = 0));
+  LAST_RESULTS.forEach((w) => {
+    if (w.radius_band_km != null) counts[w.radius_band_km] += 1;
+  });
+  radii.forEach((r) => {
+    const chip = document.createElement("span");
+    chip.className = "chip";
+    chip.style.borderColor = colorForBand(r);
+    chip.textContent = `≤ ${r} กม.: ${counts[r]} บ่อ`;
+    el.appendChild(chip);
+  });
+  const totalChip = document.createElement("span");
+  totalChip.className = "chip";
+  totalChip.textContent = `รวม: ${LAST_RESULTS.length} บ่อ`;
+  el.appendChild(totalChip);
+}
+
 let sortKey = "distance_km";
 let sortAsc = true;
 
-function render() {
-  const rows = DATA.wells.slice().sort((a, b) => {
+function renderTable() {
+  const tbody = document.getElementById("wells-tbody");
+  const rows = LAST_RESULTS.slice().sort((a, b) => {
     let av = a[sortKey], bv = b[sortKey];
     if (av == null) av = Infinity;
     if (bv == null) bv = Infinity;
@@ -228,20 +324,15 @@ function render() {
   document.getElementById("empty-msg").style.display = rows.length ? "none" : "block";
   rows.forEach((w) => {
     const tr = document.createElement("tr");
-    const color = colorForBand(w.radius_band_km, radii);
     tr.innerHTML = `
-      <td>${w.distance_km}</td>
-      <td><span class="band-tag" style="background:${color}">≤${w.radius_band_km ?? "-"} กม.</span></td>
+      <td>${w.distance_km.toFixed(2)}</td>
+      <td><span class="band-tag" style="background:${colorForBand(w.radius_band_km)}">≤${w.radius_band_km ?? "-"}</span></td>
       <td>${w.well_code}</td>
       <td>${w.location_text}</td>
       <td>${w.depth_m ?? "-"}</td>
       <td>${w.yield_m3_per_hr ?? "-"}</td>
     `;
-    tr.addEventListener("click", () => {
-      if (w.lat != null && w.lon != null) {
-        map.setView([w.lat, w.lon], 16);
-      }
-    });
+    tr.addEventListener("click", () => map.setView([w.lat, w.lon], 16));
     tbody.appendChild(tr);
   });
 }
@@ -256,11 +347,33 @@ document.querySelectorAll("#wells-table th[data-key]").forEach((th) => {
     }
     document.querySelectorAll("#wells-table th").forEach((h) => h.classList.remove("sorted"));
     th.classList.add("sorted");
-    render();
+    renderTable();
   });
 });
 
-render();
+document.getElementById("export-btn").addEventListener("click", () => {
+  if (!LAST_RESULTS.length) return;
+  const header = ["distance_km", "radius_band_km", "well_code", "location_text", "depth_m", "yield_m3_per_hr", "lat", "lon"];
+  const lines = [header.join(",")];
+  LAST_RESULTS.forEach((w) => {
+    lines.push(
+      header
+        .map((k) => {
+          const v = w[k] ?? "";
+          const s = String(v).replace(/"/g, '""');
+          return /[,"\n]/.test(s) ? `"${s}"` : s;
+        })
+        .join(",")
+    );
+  });
+  const blob = new Blob(["﻿" + lines.join("\n")], { type: "text/csv;charset=utf-8;" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "groundwater_wells_by_distance.csv";
+  a.click();
+});
+
+recompute(true);
 </script>
 </body>
 </html>
