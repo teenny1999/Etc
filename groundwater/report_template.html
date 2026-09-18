@@ -195,10 +195,13 @@ function bucketFor(distanceKm) {
 }
 
 const map = L.map("map").setView([TARGET.lat, TARGET.lon], 13);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 19,
-  attribution: "&copy; OpenStreetMap contributors",
-}).addTo(map);
+L.tileLayer(
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+  {
+    maxZoom: 19,
+    attribution: "Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+  }
+).addTo(map);
 
 let targetMarker = null;
 let circleLayers = [];

@@ -196,10 +196,13 @@ let circleLayers = [];
 let wellLayer = L.layerGroup();
 
 const map = L.map("map").setView([13.7563, 100.5018], 6);
-L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 19,
-  attribution: "&copy; OpenStreetMap contributors",
-}).addTo(map);
+L.tileLayer(
+  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+  {
+    maxZoom: 19,
+    attribution: "Tiles &copy; Esri — Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+  }
+).addTo(map);
 wellLayer.addTo(map);
 
 function haversineKm(lat1, lon1, lat2, lon2) {
