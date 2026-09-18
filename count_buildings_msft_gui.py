@@ -2,7 +2,8 @@
 """
 GUI (desktop window) for counting buildings within a radius of a coordinate
 using Microsoft's GlobalMLBuildingFootprints dataset, with a preview map
-built from OpenStreetMap tiles.
+that can switch between an OpenStreetMap street layer and Esri satellite
+imagery.
 
 Reuses the download/scan logic in count_buildings_msft.py unchanged - this
 file only adds the window, the map preview, and background-thread wiring
@@ -40,8 +41,23 @@ MAP_PX = 480
 MAP_PADDING = 1.4  # show a bit more than the raw radius so the circle isn't edge-to-edge
 MAX_ZOOM = 18
 MIN_ZOOM = 2
-TILE_SERVER = "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
 TILE_USER_AGENT = "count-buildings-msft-gui/1.0 (local desktop tool, not for bulk use)"
+
+TILE_LAYERS = {
+    "street": {
+        "label": "แผนที่ภูมิประเทศ (OpenStreetMap)",
+        "url": "https://tile.openstreetmap.org/{z}/{x}/{y}.png",
+        "ext": "png",
+        "attribution": "© OpenStreetMap contributors",
+    },
+    "satellite": {
+        "label": "ภาพถ่ายดาวเทียม (Esri World Imagery)",
+        "url": "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        "ext": "jpg",
+        "attribution": "Esri, Maxar, Earthstar Geographics, and the GIS User Community",
+    },
+}
+DEFAULT_LAYER = "street"
 
 
 def meters_per_pixel(lat: float, zoom: int) -> float:
@@ -69,16 +85,19 @@ def choose_zoom(lat: float, radius_m: float, image_px: int) -> int:
     return MIN_ZOOM
 
 
-def fetch_tile(zoom: int, x: int, y: int, cache_dir: str) -> Image.Image | None:
+def fetch_tile(
+    zoom: int, x: int, y: int, cache_dir: str, layer: str = DEFAULT_LAYER
+) -> Image.Image | None:
     n = 2**zoom
     if not (0 <= y < n):
         return None
     x = x % n  # wrap around the antimeridian instead of failing
-    tile_cache_dir = os.path.join(cache_dir, "map_tiles")
+    spec = TILE_LAYERS[layer]
+    tile_cache_dir = os.path.join(cache_dir, "map_tiles", layer)
     os.makedirs(tile_cache_dir, exist_ok=True)
-    tile_path = os.path.join(tile_cache_dir, f"{zoom}_{x}_{y}.png")
+    tile_path = os.path.join(tile_cache_dir, f"{zoom}_{x}_{y}.{spec['ext']}")
     if not os.path.exists(tile_path):
-        url = TILE_SERVER.format(z=zoom, x=x, y=y)
+        url = spec["url"].format(z=zoom, x=x, y=y)
         request = urllib.request.Request(url, headers={"User-Agent": TILE_USER_AGENT})
         try:
             with urllib.request.urlopen(request, timeout=15) as response:
@@ -95,9 +114,12 @@ def fetch_tile(zoom: int, x: int, y: int, cache_dir: str) -> Image.Image | None:
         return None
 
 
-def build_map_image(lat: float, lon: float, radius_m: float, cache_dir: str) -> Image.Image:
-    """Stitches OpenStreetMap tiles into a MAP_PX x MAP_PX preview centered
-    on (lat, lon), with a marker and a circle showing the search radius."""
+def build_map_image(
+    lat: float, lon: float, radius_m: float, cache_dir: str, layer: str = DEFAULT_LAYER
+) -> Image.Image:
+    """Stitches map tiles (OpenStreetMap street or Esri satellite, per
+    `layer`) into a MAP_PX x MAP_PX preview centered on (lat, lon), with a
+    marker and a circle showing the search radius."""
     zoom = choose_zoom(lat, radius_m, MAP_PX)
     center_x, center_y = lonlat_to_pixel(lat, lon, zoom)
     box_left = center_x - MAP_PX / 2
@@ -111,7 +133,7 @@ def build_map_image(lat: float, lon: float, radius_m: float, cache_dir: str) -> 
 
     for tx in range(tile_x_min, tile_x_max + 1):
         for ty in range(tile_y_min, tile_y_max + 1):
-            tile = fetch_tile(zoom, tx, ty, cache_dir)
+            tile = fetch_tile(zoom, tx, ty, cache_dir, layer)
             if tile is None:
                 continue
             paste_x = int(tx * TILE_SIZE - box_left)
@@ -134,7 +156,7 @@ def build_map_image(lat: float, lon: float, radius_m: float, cache_dir: str) -> 
         width=2,
     )
 
-    attribution = "© OpenStreetMap contributors"
+    attribution = TILE_LAYERS[layer]["attribution"]
     text_bbox = draw.textbbox((0, 0), attribution)
     text_w = text_bbox[2] - text_bbox[0]
     text_h = text_bbox[3] - text_bbox[1]
@@ -173,6 +195,8 @@ class App:
         self.log_queue: "queue.Queue[str]" = queue.Queue()
         self.map_queue: "queue.Queue[object]" = queue.Queue()
         self.worker_thread: threading.Thread | None = None
+        self.current_layer = DEFAULT_LAYER
+        self.last_search: tuple[float, float, int] | None = None
 
         self._build_widgets()
         self.root.after(80, self._drain_queues)
@@ -212,8 +236,24 @@ class App:
         body = ttk.Frame(self.root)
         body.pack(side="top", fill="both", expand=True, padx=8, pady=(4, 8))
 
-        map_frame = ttk.LabelFrame(body, text="แผนที่ (OpenStreetMap)")
+        map_frame = ttk.LabelFrame(body, text="แผนที่")
         map_frame.pack(side="left", fill="both", padx=(0, 8))
+
+        layer_row = ttk.Frame(map_frame)
+        layer_row.pack(side="top", fill="x", padx=4, pady=(4, 0))
+        ttk.Label(layer_row, text="ชั้นแผนที่:").pack(side="left")
+        self._layer_label_to_key = {spec["label"]: key for key, spec in TILE_LAYERS.items()}
+        self.layer_var = tk.StringVar(value=TILE_LAYERS[DEFAULT_LAYER]["label"])
+        layer_combo = ttk.Combobox(
+            layer_row,
+            textvariable=self.layer_var,
+            values=[spec["label"] for spec in TILE_LAYERS.values()],
+            state="readonly",
+            width=30,
+        )
+        layer_combo.pack(side="left", padx=(4, 0))
+        layer_combo.bind("<<ComboboxSelected>>", self.on_layer_change)
+
         self.map_label = ttk.Label(map_frame)
         self.map_label.pack(padx=4, pady=4)
         self._placeholder_image = ImageTk.PhotoImage(
@@ -365,7 +405,9 @@ class App:
 
     def _worker(self, lat: float, lon: float, radius: int) -> None:
         try:
-            map_image = build_map_image(lat, lon, radius, DEFAULT_CACHE_DIR)
+            map_image = build_map_image(
+                lat, lon, radius, DEFAULT_CACHE_DIR, self.current_layer
+            )
             self.map_queue.put(("map", map_image))
         except Exception as exc:  # noqa: BLE001 - surface it, don't crash the thread
             self.log_queue.put(f"[แผนที่] โหลดแผนที่ไม่สำเร็จ: {exc}\n")
@@ -379,6 +421,25 @@ class App:
             self.map_queue.put(("error", str(exc)))
         finally:
             sys.stdout, sys.stderr = old_stdout, old_stderr
+
+    def on_layer_change(self, event: tk.Event | None = None) -> None:
+        key = self._layer_label_to_key.get(self.layer_var.get(), DEFAULT_LAYER)
+        self.current_layer = key
+        if self.last_search is None:
+            return  # nothing searched yet - the new layer applies to the next search
+        lat, lon, radius = self.last_search
+        threading.Thread(
+            target=self._refresh_map_only, args=(lat, lon, radius), daemon=True
+        ).start()
+
+    def _refresh_map_only(self, lat: float, lon: float, radius: int) -> None:
+        try:
+            map_image = build_map_image(
+                lat, lon, radius, DEFAULT_CACHE_DIR, self.current_layer
+            )
+            self.map_queue.put(("map", map_image))
+        except Exception as exc:  # noqa: BLE001 - surface it, don't crash the thread
+            self.log_queue.put(f"[แผนที่] โหลดแผนที่ไม่สำเร็จ: {exc}\n")
 
     def _drain_queues(self) -> None:
         try:
@@ -401,6 +462,7 @@ class App:
                     self.result_meta_var.set(
                         f"รัศมี {radius:,} ม. รอบ ({lat}, {lon})"
                     )
+                    self.last_search = (lat, lon, radius)
                     self.status_var.set("เสร็จสิ้น")
                     self.run_button.configure(state="normal")
                 elif kind == "error":
