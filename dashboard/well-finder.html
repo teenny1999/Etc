@@ -1,0 +1,624 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ค้นหาบ่อบาดาลในรัศมี — Well Finder</title>
+<script>
+(function () {
+  try {
+    var saved = localStorage.getItem('esd_theme');
+    if (saved === 'dark' || saved === 'light') document.documentElement.setAttribute('data-theme', saved);
+  } catch (e) {}
+})();
+</script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+<style>
+  :root {
+    color-scheme: light;
+    --surface-1:      #fcfcfb;
+    --surface-2:      #f9f9f7;
+    --text-primary:   #0b0b0b;
+    --text-secondary: #52514e;
+    --text-muted:     #898781;
+    --gridline:       #e1e0d9;
+    --border:         rgba(11,11,11,0.10);
+    --series-water:   #2a78d6;
+    --series-source:  #4a3aa7;
+    --status-good:    #0ca30c;
+    --status-critical:#d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --surface-1:      #1a1a19;
+      --surface-2:      #0d0d0d;
+      --text-primary:   #ffffff;
+      --text-secondary: #c3c2b7;
+      --text-muted:     #898781;
+      --gridline:       #2c2c2a;
+      --border:         rgba(255,255,255,0.10);
+      --series-water:   #3987e5;
+      --series-source:  #9085e9;
+      --status-good:    #0ca30c;
+      --status-critical:#e66767;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --surface-1:      #1a1a19;
+    --surface-2:      #0d0d0d;
+    --text-primary:   #ffffff;
+    --text-secondary: #c3c2b7;
+    --text-muted:     #898781;
+    --gridline:       #2c2c2a;
+    --border:         rgba(255,255,255,0.10);
+    --series-water:   #3987e5;
+    --series-source:  #9085e9;
+    --status-good:    #0ca30c;
+    --status-critical:#e66767;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--surface-2);
+    color: var(--text-primary);
+    font-family: system-ui, -apple-system, "Segoe UI", "Sarabun", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  header {
+    padding: 14px 20px;
+    background: var(--surface-1);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 16px; margin: 0; font-weight: 600; }
+  header .ver { color: var(--text-muted); font-size: 12px; font-weight: 400; margin-left: 6px; }
+  header nav a { color: var(--text-secondary); font-size: 12px; text-decoration: none; margin-right: 14px; }
+  header nav a:hover { text-decoration: underline; }
+  .btn, button.btn {
+    padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border);
+    background: var(--series-water); color: #fff; font-size: 12px; cursor: pointer; font-weight: 500;
+  }
+  .btn.secondary { background: transparent; color: var(--text-secondary); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+  main { max-width: 1080px; margin: 0 auto; padding: 16px 20px 60px; }
+  .panel {
+    background: var(--surface-1); border: 1px solid var(--border); border-radius: 10px;
+    padding: 16px 18px; margin-bottom: 16px;
+  }
+  .panel h2 { font-size: 14px; margin: 0 0 10px; font-weight: 600; }
+  .panel h2 .step { color: var(--text-muted); font-weight: 400; }
+  .hint { font-size: 11.5px; color: var(--text-muted); display: block; margin: 2px 0 12px; }
+  .row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
+  .row label { font-size: 12px; color: var(--text-secondary); min-width: 130px; }
+  input[type=text], input[type=number] {
+    padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px;
+    background: var(--surface-2); color: var(--text-primary); font-size: 13px;
+  }
+  #coord-input { width: 220px; }
+  #radius-input { width: 90px; }
+  #province-filter { width: 100%; margin-bottom: 8px; }
+  .province-checklist {
+    max-height: 190px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 10px; display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 10px;
+    background: var(--surface-2);
+  }
+  .province-checklist label {
+    font-size: 12.5px; color: var(--text-primary); display: flex; align-items: center; gap: 6px; cursor: pointer;
+  }
+  .province-checklist label.hidden-by-filter { display: none; }
+  #selected-provinces-summary { font-size: 11.5px; color: var(--text-muted); margin-top: 6px; }
+  #auto-detect-status { font-size: 11.5px; color: var(--text-secondary); margin-left: 8px; }
+  #search-status { font-size: 12.5px; color: var(--text-secondary); margin: 6px 0 0; min-height: 18px; }
+  #search-status.error { color: var(--status-critical); }
+  .stat-tiles { display: flex; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
+  .tile {
+    background: var(--surface-2); border: 1px solid var(--border); border-radius: 8px;
+    padding: 10px 16px; min-width: 140px;
+  }
+  .tile .label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .04em; }
+  .tile .value { font-size: 20px; font-weight: 600; margin-top: 2px; }
+  #map { height: 440px; border-radius: 8px; border: 1px solid var(--border); }
+  .legend { display: flex; gap: 16px; padding: 8px 2px; font-size: 11px; color: var(--text-secondary); flex-wrap: wrap; }
+  .legend .dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; vertical-align: -1px; }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  thead th {
+    position: sticky; top: 0; background: var(--surface-1); text-align: left; color: var(--text-muted);
+    font-weight: 500; padding: 8px 8px; border-bottom: 1px solid var(--border); cursor: pointer; white-space: nowrap;
+  }
+  thead th:hover { color: var(--text-primary); }
+  tbody td { padding: 7px 8px; border-bottom: 1px solid var(--gridline); }
+  tbody tr:hover { background: var(--surface-2); cursor: pointer; }
+  .table-wrap { max-height: 420px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; margin-top: 10px; }
+  .empty-row td { text-align: center; color: var(--text-muted); padding: 24px; }
+  footer { text-align: center; color: var(--text-muted); font-size: 11px; padding: 20px; }
+  footer a { color: inherit; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>ค้นหาบ่อบาดาลในรัศมี <span class="ver">Well Finder — unofficial</span></h1>
+  <nav>
+    <a href="./index.html">← กลับไป Environmental Sample Dashboard</a>
+  </nav>
+  <button class="btn secondary" id="theme-toggle-btn" type="button">🌙 โหมดมืด</button>
+</header>
+
+<main>
+
+<div class="panel">
+  <p style="margin:0 0 4px;font-size:12.5px;color:var(--text-secondary)">
+    กรอกพิกัดโรงงาน + รัศมี แล้วเลือกจังหวัดที่ต้องการค้นหา ระบบจะดึงข้อมูลบ่อบาดาลจาก
+    <strong>API สาธารณะของกรมทรัพยากรน้ำบาดาล (DGR)</strong> ที่ใช้อยู่เบื้องหลังหน้า
+    <a href="http://app.dgr.go.th/newpasutara/xml/download.php" target="_blank" rel="noopener">download.php</a>
+    (ปุ่ม "json" ในหน้านั้น) มาคำนวณระยะห่างจากพิกัดที่กรอกให้อัตโนมัติ — ไม่ต้องดาวน์โหลดไฟล์เอง
+  </p>
+  <p class="hint" style="margin:0">
+    ⚠️ เป็นการเรียก API เดียวกับที่เว็บไซต์ DGR ใช้เอง (ไม่ใช่ API ทางการที่มีเอกสารรองรับ) หากทาง DGR
+    เปลี่ยนแปลงระบบ เครื่องมือนี้อาจใช้งานไม่ได้ทันที และข้อมูลจำกัดเฉพาะบ่อ "สถานะใช้การได้ + น้ำจืด" ตามที่ระบบต้นทางกรองไว้
+  </p>
+</div>
+
+<div class="panel">
+  <h2><span class="step">1)</span> พิกัดโรงงาน และรัศมีค้นหา</h2>
+  <div class="row">
+    <label for="coord-input">พิกัด (lat, lng)</label>
+    <input type="text" id="coord-input" placeholder="เช่น 13.7367, 100.5232">
+    <button class="btn secondary" id="use-my-location-btn" type="button">📍 ใช้ตำแหน่งปัจจุบัน</button>
+  </div>
+  <span class="hint">คัดลอกพิกัดจาก Google Maps มาวางได้เลย (คลิกขวาบนแผนที่ Google Maps → คัดลอกจะได้รูปแบบนี้พอดี)</span>
+  <div class="row">
+    <label for="radius-input">รัศมีค้นหา (กม.)</label>
+    <input type="number" id="radius-input" value="5" min="0.1" max="100" step="0.5">
+  </div>
+</div>
+
+<div class="panel">
+  <h2><span class="step">2)</span> เลือกจังหวัดที่จะค้นหา</h2>
+  <span class="hint">
+    ข้อมูลของ DGR แบ่งเก็บเป็นรายจังหวัด ต้องเลือกจังหวัดที่โรงงานตั้งอยู่ก่อน — และถ้าพิกัดอยู่ใกล้
+    รอยต่อจังหวัด (รัศมีค้นหาอาจครอบคลุมข้ามไปอีกจังหวัด) ให้เลือกจังหวัดข้างเคียงเพิ่มด้วย
+  </span>
+  <div class="row" style="margin-bottom:6px">
+    <button class="btn secondary" id="auto-detect-province-btn" type="button">🔎 ตรวจจังหวัดจากพิกัดให้อัตโนมัติ</button>
+    <span id="auto-detect-status"></span>
+  </div>
+  <input type="text" id="province-filter" placeholder="พิมพ์ค้นหาชื่อจังหวัด...">
+  <div class="province-checklist" id="province-list"></div>
+  <div id="selected-provinces-summary">ยังไม่ได้เลือกจังหวัด</div>
+</div>
+
+<div class="row">
+  <button class="btn" id="search-btn" type="button">🔍 ค้นหาบ่อบาดาลในรัศมี</button>
+</div>
+<div id="search-status"></div>
+
+<div class="panel" id="results-panel" style="display:none">
+  <div class="stat-tiles">
+    <div class="tile"><div class="label">พบบ่อในรัศมี</div><div class="value" id="stat-count">–</div></div>
+    <div class="tile"><div class="label">รัศมีที่ใช้ค้นหา</div><div class="value" id="stat-radius">–</div></div>
+    <div class="tile"><div class="label">ใกล้ที่สุด</div><div class="value" id="stat-nearest">–</div></div>
+  </div>
+  <div id="map"></div>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--series-source)"></span>พิกัดโรงงาน</span>
+    <span><span class="dot" style="background:var(--series-water)"></span>บ่อบาดาล</span>
+    <span>เส้นประวงกลม = ขอบเขตรัศมีค้นหา</span>
+  </div>
+  <h2 style="margin-top:14px">
+    รายการบ่อบาดาล
+    <button class="btn secondary" id="copy-table-btn" type="button" style="font-weight:400">คัดลอกตาราง</button>
+    <button class="btn secondary" id="export-csv-btn" type="button" style="font-weight:400">ส่งออก CSV</button>
+  </h2>
+  <div class="table-wrap">
+    <table id="results-table">
+      <thead>
+        <tr>
+          <th data-sort="dist">ระยะห่าง (กม.)</th>
+          <th data-sort="no">รหัสบ่อ</th>
+          <th data-sort="loc">ตำบล / อำเภอ / จังหวัด</th>
+          <th data-sort="type">ประเภทบ่อ</th>
+          <th data-sort="depth">ความลึกเจาะ (ม.)</th>
+          <th data-sort="static">ระดับน้ำหยุดนิ่ง (ม.)</th>
+          <th data-sort="latlng">พิกัด</th>
+        </tr>
+      </thead>
+      <tbody id="results-tbody"></tbody>
+    </table>
+  </div>
+</div>
+
+</main>
+
+<footer>
+  ข้อมูลบ่อบาดาลจาก <a href="http://www.dgr.go.th" target="_blank" rel="noopener">กรมทรัพยากรน้ำบาดาล (DGR)</a> —
+  เครื่องมือนี้เป็นการเรียกใช้ API สาธารณะที่เว็บไซต์ DGR ใช้เอง ไม่ใช่บริการทางการของกรมฯ
+  ผลลัพธ์ใช้เพื่อประกอบการพิจารณาเบื้องต้นเท่านั้น ควรตรวจสอบข้อมูลอย่างเป็นทางการอีกครั้งก่อนใช้อ้างอิง
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script>
+'use strict';
+
+// จังหวัดทั้งหมด — id ตรงกับ ddlGeo ของระบบ DGR (app.dgr.go.th/newpasutara)
+const PROVINCES = [
+  {id:20,name:"กระบี่"},{id:1,name:"กรุงเทพมหานคร"},{id:56,name:"กาญจนบุรี"},{id:34,name:"กาฬสินธุ์"},
+  {id:49,name:"กำแพงเพชร"},{id:28,name:"ขอนแก่น"},{id:13,name:"จันทบุรี"},{id:15,name:"ฉะเชิงเทรา"},
+  {id:11,name:"ชลบุรี"},{id:9,name:"ชัยนาท"},{id:25,name:"ชัยภูมิ"},{id:68,name:"ชุมพร"},
+  {id:45,name:"เชียงราย"},{id:38,name:"เชียงใหม่"},{id:71,name:"ตรัง"},{id:14,name:"ตราด"},
+  {id:50,name:"ตาก"},{id:17,name:"นครนายก"},{id:58,name:"นครปฐม"},{id:36,name:"นครพนม"},
+  {id:19,name:"นครราชสีมา"},{id:63,name:"นครศรีธรรมราช"},{id:47,name:"นครสวรรค์"},{id:3,name:"นนทบุรี"},
+  {id:75,name:"นราธิวาส"},{id:43,name:"น่าน"},{id:77,name:"บึงกาฬ"},{id:76,name:"บุรีรัมย์"},
+  {id:4,name:"ปทุมธานี"},{id:62,name:"ประจวบคีรีขันธ์"},{id:16,name:"ปราจีนบุรี"},{id:73,name:"ปัตตานี"},
+  {id:5,name:"พระนครศรีอยุธยา"},{id:44,name:"พะเยา"},{id:64,name:"พังงา"},{id:72,name:"พัทลุง"},
+  {id:53,name:"พิจิตร"},{id:52,name:"พิษณุโลก"},{id:61,name:"เพชรบุรี"},{id:54,name:"เพชรบูรณ์"},
+  {id:42,name:"แพร่"},{id:65,name:"ภูเก็ต"},{id:32,name:"มหาสารคาม"},{id:37,name:"มุกดาหาร"},
+  {id:46,name:"แม่ฮ่องสอน"},{id:24,name:"ยโสธร"},{id:74,name:"ยะลา"},{id:33,name:"ร้อยเอ็ด"},
+  {id:67,name:"ระนอง"},{id:12,name:"ระยอง"},{id:55,name:"ราชบุรี"},{id:7,name:"ลพบุรี"},
+  {id:40,name:"ลำปาง"},{id:39,name:"ลำพูน"},{id:30,name:"เลย"},{id:22,name:"ศรีสะเกษ"},
+  {id:35,name:"สกลนคร"},{id:69,name:"สงขลา"},{id:70,name:"สตูล"},{id:2,name:"สมุทรปราการ"},
+  {id:60,name:"สมุทรสงคราม"},{id:59,name:"สมุทรสาคร"},{id:18,name:"สระแก้ว"},{id:10,name:"สระบุรี"},
+  {id:8,name:"สิงห์บุรี"},{id:51,name:"สุโขทัย"},{id:57,name:"สุพรรณบุรี"},{id:66,name:"สุราษฎร์ธานี"},
+  {id:21,name:"สุรินทร์"},{id:31,name:"หนองคาย"},{id:27,name:"หนองบัวลำภู"},{id:6,name:"อ่างทอง"},
+  {id:26,name:"อำนาจเจริญ"},{id:29,name:"อุดรธานี"},{id:41,name:"อุตรดิตถ์"},{id:48,name:"อุทัยธานี"},
+  {id:23,name:"อุบลราชธานี"}
+];
+
+const DGR_API = 'https://pasutara.dgr.go.th/api_well/api/FindWell';
+
+// --- theme toggle -----------------------------------------------------
+function isDarkActive() {
+  const attr = document.documentElement.getAttribute('data-theme');
+  if (attr === 'dark') return true;
+  if (attr === 'light') return false;
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+function refreshThemeBtn() {
+  document.getElementById('theme-toggle-btn').textContent = isDarkActive() ? '☀️ โหมดสว่าง' : '🌙 โหมดมืด';
+}
+refreshThemeBtn();
+document.getElementById('theme-toggle-btn').addEventListener('click', () => {
+  const next = isDarkActive() ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  try { localStorage.setItem('esd_theme', next); } catch (e) {}
+  refreshThemeBtn();
+});
+
+// --- province checklist -------------------------------------------------
+const provinceListEl = document.getElementById('province-list');
+PROVINCES.forEach(p => {
+  const label = document.createElement('label');
+  label.dataset.name = p.name;
+  label.innerHTML = `<input type="checkbox" value="${p.id}" class="province-checkbox"> ${p.name}`;
+  provinceListEl.appendChild(label);
+});
+
+function selectedProvinceIds() {
+  return Array.from(document.querySelectorAll('.province-checkbox:checked')).map(el => Number(el.value));
+}
+
+function updateSelectedSummary() {
+  const ids = selectedProvinceIds();
+  const summary = document.getElementById('selected-provinces-summary');
+  if (ids.length === 0) { summary.textContent = 'ยังไม่ได้เลือกจังหวัด'; return; }
+  const names = ids.map(id => (PROVINCES.find(p => p.id === id) || {}).name).filter(Boolean);
+  summary.textContent = `เลือกแล้ว ${ids.length} จังหวัด: ${names.join(', ')}`;
+}
+provinceListEl.addEventListener('change', updateSelectedSummary);
+
+document.getElementById('province-filter').addEventListener('input', (e) => {
+  const q = e.target.value.trim();
+  provinceListEl.querySelectorAll('label').forEach(label => {
+    label.classList.toggle('hidden-by-filter', q && !label.dataset.name.includes(q));
+  });
+});
+
+function checkProvinceByName(name) {
+  const label = Array.from(provinceListEl.querySelectorAll('label')).find(l => l.dataset.name === name);
+  if (!label) return false;
+  const cb = label.querySelector('input');
+  if (!cb.checked) { cb.checked = true; updateSelectedSummary(); }
+  label.scrollIntoView({ block: 'nearest' });
+  return true;
+}
+
+// --- coordinate helpers ---------------------------------------------------
+function parseCoordInput(str) {
+  const parts = str.trim().split(/[,\s]+/).map(Number);
+  if (parts.length >= 2 && Number.isFinite(parts[0]) && Number.isFinite(parts[1])
+      && Math.abs(parts[0]) <= 90 && Math.abs(parts[1]) <= 180) {
+    return [parts[0], parts[1]];
+  }
+  return null;
+}
+
+document.getElementById('use-my-location-btn').addEventListener('click', () => {
+  if (!navigator.geolocation) { alert('เบราว์เซอร์นี้ไม่รองรับการขอตำแหน่งปัจจุบัน'); return; }
+  navigator.geolocation.getCurrentPosition(
+    pos => { document.getElementById('coord-input').value = `${pos.coords.latitude.toFixed(6)}, ${pos.coords.longitude.toFixed(6)}`; },
+    err => { alert('ขอตำแหน่งปัจจุบันไม่สำเร็จ: ' + err.message); }
+  );
+});
+
+// --- auto-detect province via OpenStreetMap Nominatim (best-effort) ------
+document.getElementById('auto-detect-province-btn').addEventListener('click', async () => {
+  const statusEl = document.getElementById('auto-detect-status');
+  const coord = parseCoordInput(document.getElementById('coord-input').value);
+  if (!coord) { statusEl.textContent = 'กรุณากรอกพิกัดโรงงานให้ถูกต้องก่อน'; return; }
+  statusEl.textContent = 'กำลังตรวจสอบ...';
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${coord[0]}&lon=${coord[1]}&accept-language=th`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const addr = data.address || {};
+    let provinceName = null;
+    if (addr.province) provinceName = addr.province.replace(/^จังหวัด/, '');
+    else if (addr.city === 'กรุงเทพมหานคร') provinceName = 'กรุงเทพมหานคร';
+    else if (addr.state) provinceName = addr.state.replace(/^จังหวัด/, '');
+    if (provinceName && checkProvinceByName(provinceName)) {
+      statusEl.textContent = `✓ ตรวจพบและเลือกให้แล้ว: ${provinceName} (ตรวจสอบจังหวัดข้างเคียงเพิ่มเองถ้าจำเป็น)`;
+    } else {
+      statusEl.textContent = 'ตรวจไม่พบจังหวัดที่ตรงกัน กรุณาเลือกเอง';
+    }
+  } catch (err) {
+    statusEl.textContent = 'ตรวจจังหวัดอัตโนมัติไม่สำเร็จ (' + err.message + ') กรุณาเลือกเอง';
+  }
+});
+
+// --- distance ---------------------------------------------------------
+function haversineKm(a, b) {
+  const R = 6371;
+  const toRad = d => d * Math.PI / 180;
+  const dLat = toRad(b[0] - a[0]);
+  const dLng = toRad(b[1] - a[1]);
+  const lat1 = toRad(a[0]), lat2 = toRad(b[0]);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.asin(Math.sqrt(h));
+}
+
+// --- fetch wells per province ------------------------------------------
+async function fetchProvinceWells(provinceId) {
+  const url = `${DGR_API}?ddlGeo=${provinceId}&ddlProvince=&ddlAmphur=&btn4=json`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
+}
+
+// --- map + results state ------------------------------------------------
+let map = null;
+let wellLayer = null;
+let radiusCircle = null;
+let factoryMarker = null;
+const wellMarkersById = new Map();
+let currentResults = [];
+let sortState = { key: 'dist', dir: 1 };
+
+function ensureMap(initialCoord) {
+  if (map) { map.invalidateSize(); return; }
+  map = L.map('map').setView(initialCoord, 13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 19,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+  wellLayer = L.layerGroup().addTo(map);
+}
+
+function renderMap(factoryCoord, radiusKm, wells) {
+  ensureMap(factoryCoord);
+  wellLayer.clearLayers();
+  wellMarkersById.clear();
+
+  if (factoryMarker) map.removeLayer(factoryMarker);
+  factoryMarker = L.circleMarker(factoryCoord, {
+    radius: 9, color: '#fff', weight: 2, fillColor: getCss('--series-source'), fillOpacity: 1
+  }).bindPopup('พิกัดโรงงาน').addTo(map);
+
+  if (radiusCircle) map.removeLayer(radiusCircle);
+  radiusCircle = L.circle(factoryCoord, {
+    radius: radiusKm * 1000, color: getCss('--series-source'), weight: 1.5, dashArray: '6 6', fillOpacity: 0.04
+  }).addTo(map);
+
+  wells.forEach(w => {
+    const marker = L.circleMarker([w.lat, w.lng], {
+      radius: 6, color: '#fff', weight: 1.5, fillColor: getCss('--series-water'), fillOpacity: 0.9
+    }).bindPopup(wellPopupHtml(w));
+    marker.addTo(wellLayer);
+    wellMarkersById.set(w.no, marker);
+  });
+
+  map.fitBounds(radiusCircle.getBounds(), { padding: [20, 20] });
+}
+
+function getCss(varName) {
+  return getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+}
+
+function wellPopupHtml(w) {
+  return `<strong>${escapeHtml(w.no)}</strong><br>`
+    + `${escapeHtml(w.tumbolname)} ${escapeHtml(w.ampurname)} ${escapeHtml(w.provincenam)}<br>`
+    + `ประเภท: ${escapeHtml(w.welltypename || '–')}<br>`
+    + `ความลึกเจาะ: ${w.deeptdrill || '–'} ม.<br>`
+    + `ระยะห่าง: ${w.distKm.toFixed(2)} กม.`;
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+// --- table --------------------------------------------------------------
+function compareNullableNumeric(rawA, rawB, dir) {
+  const a = parseFloat(rawA), b = parseFloat(rawB);
+  const aOk = Number.isFinite(a), bOk = Number.isFinite(b);
+  if (!aOk && !bOk) return 0;
+  if (!aOk) return 1;  // missing values always sort last, regardless of direction
+  if (!bOk) return -1;
+  return (a - b) * dir;
+}
+
+function renderTable() {
+  const tbody = document.getElementById('results-tbody');
+  const sorted = [...currentResults].sort((a, b) => {
+    const dir = sortState.dir;
+    switch (sortState.key) {
+      case 'no': return a.no.localeCompare(b.no) * dir;
+      case 'loc': return `${a.provincenam}${a.ampurname}${a.tumbolname}`.localeCompare(`${b.provincenam}${b.ampurname}${b.tumbolname}`) * dir;
+      case 'type': return String(a.welltypename || '').localeCompare(String(b.welltypename || '')) * dir;
+      case 'depth': return compareNullableNumeric(a.deeptdrill, b.deeptdrill, dir);
+      case 'static': return compareNullableNumeric(a.static, b.static, dir);
+      case 'latlng': return (a.lat - b.lat) * dir;
+      default: return (a.distKm - b.distKm) * dir;
+    }
+  });
+
+  if (sorted.length === 0) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="7">ไม่พบบ่อบาดาลในรัศมีที่กำหนด</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = sorted.map(w => `
+    <tr data-well="${escapeHtml(w.no)}">
+      <td>${w.distKm.toFixed(2)}</td>
+      <td>${escapeHtml(w.no)}</td>
+      <td>${escapeHtml(w.tumbolname)} / ${escapeHtml(w.ampurname)} / ${escapeHtml(w.provincenam)}</td>
+      <td>${escapeHtml(w.welltypename || '–')}</td>
+      <td>${w.deeptdrill || '–'}</td>
+      <td>${w.static || '–'}</td>
+      <td>${w.lat.toFixed(5)}, ${w.lng.toFixed(5)}</td>
+    </tr>
+  `).join('');
+
+  tbody.querySelectorAll('tr[data-well]').forEach(tr => {
+    tr.addEventListener('click', () => {
+      const marker = wellMarkersById.get(tr.dataset.well);
+      if (!marker) return;
+      map.setView(marker.getLatLng(), Math.max(map.getZoom(), 15));
+      marker.openPopup();
+    });
+  });
+}
+
+document.querySelectorAll('#results-table thead th[data-sort]').forEach(th => {
+  th.addEventListener('click', () => {
+    const key = th.dataset.sort;
+    sortState.dir = (sortState.key === key) ? -sortState.dir : 1;
+    sortState.key = key;
+    renderTable();
+  });
+});
+
+// --- copy / export --------------------------------------------------------
+const TABLE_HEADERS = ['ระยะห่าง (กม.)', 'รหัสบ่อ', 'ตำบล', 'อำเภอ', 'จังหวัด', 'ประเภทบ่อ', 'ความลึกเจาะ (ม.)', 'ระดับน้ำหยุดนิ่ง (ม.)', 'lat', 'lng'];
+function tableRows() {
+  return [...currentResults].sort((a, b) => a.distKm - b.distKm).map(w => [
+    w.distKm.toFixed(2), w.no, w.tumbolname, w.ampurname, w.provincenam,
+    w.welltypename || '', w.deeptdrill || '', w.static || '', w.lat, w.lng
+  ]);
+}
+
+document.getElementById('copy-table-btn').addEventListener('click', async () => {
+  const text = [TABLE_HEADERS.join('\t'), ...tableRows().map(r => r.join('\t'))].join('\n');
+  try {
+    await navigator.clipboard.writeText(text);
+    flashStatus('คัดลอกตารางแล้ว (วางลง Excel/Sheets ได้เลย)');
+  } catch (e) {
+    alert('คัดลอกไม่สำเร็จ: ' + e.message);
+  }
+});
+
+document.getElementById('export-csv-btn').addEventListener('click', () => {
+  const csvEscape = v => /[",\n]/.test(v) ? `"${String(v).replace(/"/g, '""')}"` : v;
+  const csv = [TABLE_HEADERS, ...tableRows()].map(row => row.map(csvEscape).join(',')).join('\n');
+  const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'wells_in_radius.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+function flashStatus(msg) {
+  const el = document.getElementById('search-status');
+  el.textContent = msg;
+  el.classList.remove('error');
+}
+
+// --- main search ---------------------------------------------------------
+document.getElementById('search-btn').addEventListener('click', runSearch);
+
+async function runSearch() {
+  const statusEl = document.getElementById('search-status');
+  statusEl.classList.remove('error');
+
+  const coord = parseCoordInput(document.getElementById('coord-input').value);
+  if (!coord) { statusEl.textContent = 'กรุณากรอกพิกัดโรงงานให้ถูกต้อง เช่น 13.7367, 100.5232'; statusEl.classList.add('error'); return; }
+
+  const radiusKm = parseFloat(document.getElementById('radius-input').value);
+  if (!(radiusKm > 0)) { statusEl.textContent = 'กรุณากรอกรัศมีค้นหาเป็นตัวเลขมากกว่า 0'; statusEl.classList.add('error'); return; }
+
+  const provinceIds = selectedProvinceIds();
+  if (provinceIds.length === 0) { statusEl.textContent = 'กรุณาเลือกอย่างน้อย 1 จังหวัด'; statusEl.classList.add('error'); return; }
+
+  const searchBtn = document.getElementById('search-btn');
+  searchBtn.disabled = true;
+  let done = 0;
+  statusEl.textContent = `กำลังดึงข้อมูล... (0/${provinceIds.length} จังหวัด)`;
+
+  const settled = await Promise.allSettled(provinceIds.map(id =>
+    fetchProvinceWells(id).then(wells => {
+      done++;
+      statusEl.textContent = `กำลังดึงข้อมูล... (${done}/${provinceIds.length} จังหวัด)`;
+      return wells;
+    }).catch(err => { done++; throw err; })
+  ));
+
+  searchBtn.disabled = false;
+
+  const failedProvinces = [];
+  const allWells = [];
+  settled.forEach((r, i) => {
+    if (r.status === 'fulfilled') allWells.push(...r.value);
+    else failedProvinces.push(PROVINCES.find(p => p.id === provinceIds[i])?.name || provinceIds[i]);
+  });
+
+  const seen = new Set();
+  const withDistance = [];
+  for (const w of allWells) {
+    if (seen.has(w.no)) continue;
+    seen.add(w.no);
+    const lat = parseFloat(w.lat), lng = parseFloat(w.long);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    const distKm = haversineKm(coord, [lat, lng]);
+    if (distKm <= radiusKm) withDistance.push({ ...w, lat, lng, distKm });
+  }
+
+  currentResults = withDistance;
+  sortState = { key: 'dist', dir: 1 };
+
+  document.getElementById('results-panel').style.display = '';
+  document.getElementById('stat-count').textContent = withDistance.length.toLocaleString('th-TH');
+  document.getElementById('stat-radius').textContent = radiusKm + ' กม.';
+  document.getElementById('stat-nearest').textContent = withDistance.length
+    ? Math.min(...withDistance.map(w => w.distKm)).toFixed(2) + ' กม.' : '–';
+
+  renderMap(coord, radiusKm, withDistance);
+  renderTable();
+
+  let msg = `พบ ${withDistance.length.toLocaleString('th-TH')} บ่อ ในรัศมี ${radiusKm} กม. จาก ${provinceIds.length} จังหวัดที่เลือก`;
+  if (failedProvinces.length) {
+    msg += ` — ⚠️ ดึงข้อมูลไม่สำเร็จ: ${failedProvinces.join(', ')} (ลองค้นหาใหม่อีกครั้ง)`;
+    statusEl.classList.add('error');
+  }
+  statusEl.textContent = msg;
+
+  document.getElementById('results-panel').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+</script>
+</body>
+</html>
