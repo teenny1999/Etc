@@ -32,8 +32,11 @@ from count_buildings_msft import (
     DEFAULT_CACHE_DIR,
     DEFAULT_DATASET_LINKS_URL,
     DEFAULT_RADIUS_M,
-    run,
+    HRS_RING_LABELS_TH,
+    run_combined,
 )
+
+DEFAULT_PEOPLE_PER_BUILDING = 3.0
 
 TILE_SIZE = 256
 MAP_PX = 480
@@ -167,8 +170,8 @@ class App:
     def __init__(self, root: tk.Tk):
         self.root = root
         root.title("นับอาคารจาก Microsoft GlobalMLBuildingFootprints")
-        root.geometry("880x640")
-        root.minsize(760, 560)
+        root.geometry("900x780")
+        root.minsize(800, 680)
 
         self.log_queue: "queue.Queue[str]" = queue.Queue()
         self.map_queue: "queue.Queue[object]" = queue.Queue()
@@ -203,6 +206,14 @@ class App:
 
         self.run_button = ttk.Button(form, text="ค้นหา", command=self.on_search)
         self.run_button.grid(row=0, column=6, padx=(0, 4))
+
+        ttk.Label(form, text="คนต่อหลัง (ประมาณการ, สำหรับ HRS):").grid(
+            row=1, column=0, columnspan=3, sticky="w", pady=(6, 0)
+        )
+        self.people_per_building_var = tk.StringVar(value=str(DEFAULT_PEOPLE_PER_BUILDING))
+        ppb_entry = ttk.Entry(form, textvariable=self.people_per_building_var, width=10)
+        ppb_entry.grid(row=1, column=3, sticky="w", padx=(4, 0), pady=(6, 0))
+        self._install_context_menu(ppb_entry, editable=True)
 
         self.status_var = tk.StringVar(value="กรอกพิกัดแล้วกด “ค้นหา”")
         ttk.Label(self.root, textvariable=self.status_var, foreground="#555").pack(
@@ -249,6 +260,52 @@ class App:
         )
         meta_entry.pack(anchor="w", fill="x", padx=8, pady=(0, 6))
         self._install_context_menu(meta_entry, editable=False)
+
+        hrs_frame = ttk.LabelFrame(
+            right, text="ประชากรตามวงรัศมี สำหรับ HRS (Table 5-9) — เลือก/คัดลอกได้"
+        )
+        hrs_frame.pack(side="top", fill="x", pady=(8, 0))
+        ttk.Label(hrs_frame, text="วงรัศมี", foreground="#555").grid(
+            row=0, column=0, sticky="w", padx=(8, 4), pady=(4, 2)
+        )
+        ttk.Label(hrs_frame, text="จำนวนอาคาร", foreground="#555").grid(
+            row=0, column=1, sticky="w", padx=4, pady=(4, 2)
+        )
+        ttk.Label(hrs_frame, text="ประชากรประมาณการ", foreground="#555").grid(
+            row=0, column=2, sticky="w", padx=4, pady=(4, 2)
+        )
+        self.hrs_building_vars: list[tk.StringVar] = []
+        self.hrs_population_vars: list[tk.StringVar] = []
+        for i, ring_label in enumerate(HRS_RING_LABELS_TH):
+            ttk.Label(hrs_frame, text=ring_label).grid(
+                row=i + 1, column=0, sticky="w", padx=(8, 4), pady=1
+            )
+            building_var = tk.StringVar(value="-")
+            building_entry = tk.Entry(
+                hrs_frame,
+                textvariable=building_var,
+                state="readonly",
+                relief="flat",
+                borderwidth=0,
+                width=10,
+            )
+            building_entry.grid(row=i + 1, column=1, sticky="w", padx=4, pady=1)
+            self._install_context_menu(building_entry, editable=False)
+            self.hrs_building_vars.append(building_var)
+
+            population_var = tk.StringVar(value="-")
+            population_entry = tk.Entry(
+                hrs_frame,
+                textvariable=population_var,
+                state="readonly",
+                relief="flat",
+                borderwidth=0,
+                width=10,
+                font=("TkDefaultFont", 10, "bold"),
+            )
+            population_entry.grid(row=i + 1, column=2, sticky="w", padx=4, pady=(1, 4))
+            self._install_context_menu(population_entry, editable=False)
+            self.hrs_population_vars.append(population_var)
 
         log_frame = ttk.LabelFrame(right, text="สถานะการทำงาน (เลือก/คัดลอกได้)")
         log_frame.pack(side="top", fill="both", expand=True, pady=(8, 0))
@@ -320,7 +377,7 @@ class App:
                 self.log_text.insert("end", part)
         self.log_text.see("end")
 
-    def _validated_inputs(self) -> tuple[float, float, int] | None:
+    def _validated_inputs(self) -> tuple[float, float, int, float] | None:
         try:
             lat = float(self.lat_var.get().strip())
             if not (-90 <= lat <= 90):
@@ -342,7 +399,14 @@ class App:
         except ValueError:
             self.status_var.set("รัศมีต้องเป็นจำนวนเต็มมากกว่า 0")
             return None
-        return lat, lon, radius
+        try:
+            people_per_building = float(self.people_per_building_var.get().strip())
+            if people_per_building < 0:
+                raise ValueError("must be non-negative")
+        except ValueError:
+            self.status_var.set("คนต่อหลังต้องเป็นตัวเลขมากกว่าหรือเท่ากับ 0")
+            return None
+        return lat, lon, radius, people_per_building
 
     def on_search(self) -> None:
         if self.worker_thread is not None and self.worker_thread.is_alive():
@@ -350,20 +414,26 @@ class App:
         inputs = self._validated_inputs()
         if inputs is None:
             return
-        lat, lon, radius = inputs
+        lat, lon, radius, people_per_building = inputs
 
         self.run_button.configure(state="disabled")
         self.status_var.set("กำลังค้นหา...")
         self.result_var.set("-")
         self.result_meta_var.set("")
+        for var in self.hrs_building_vars:
+            var.set("-")
+        for var in self.hrs_population_vars:
+            var.set("-")
         self.log_text.delete("1.0", "end")
 
         self.worker_thread = threading.Thread(
-            target=self._worker, args=(lat, lon, radius), daemon=True
+            target=self._worker, args=(lat, lon, radius, people_per_building), daemon=True
         )
         self.worker_thread.start()
 
-    def _worker(self, lat: float, lon: float, radius: int) -> None:
+    def _worker(
+        self, lat: float, lon: float, radius: int, people_per_building: float
+    ) -> None:
         try:
             map_image = build_map_image(lat, lon, radius, DEFAULT_CACHE_DIR)
             self.map_queue.put(("map", map_image))
@@ -373,8 +443,12 @@ class App:
         old_stdout, old_stderr = sys.stdout, sys.stderr
         sys.stdout = sys.stderr = QueueWriter(self.log_queue)
         try:
-            total = run(lat, lon, radius, DEFAULT_CACHE_DIR, DEFAULT_DATASET_LINKS_URL)
-            self.map_queue.put(("done", (total, lat, lon, radius)))
+            total, ring_counts = run_combined(
+                lat, lon, radius, DEFAULT_CACHE_DIR, DEFAULT_DATASET_LINKS_URL
+            )
+            self.map_queue.put(
+                ("done", (total, ring_counts, lat, lon, radius, people_per_building))
+            )
         except Exception as exc:  # noqa: BLE001 - report it in the UI, don't crash the thread
             self.map_queue.put(("error", str(exc)))
         finally:
@@ -396,11 +470,15 @@ class App:
                     self.map_label.configure(image=photo)
                     self.map_label.image = photo  # keep a reference alive
                 elif kind == "done":
-                    total, lat, lon, radius = payload
+                    total, ring_counts, lat, lon, radius, people_per_building = payload
                     self.result_var.set(f"{total:,} อาคาร")
                     self.result_meta_var.set(
                         f"รัศมี {radius:,} ม. รอบ ({lat}, {lon})"
                     )
+                    for i, count in enumerate(ring_counts):
+                        self.hrs_building_vars[i].set(f"{count:,}")
+                        population = round(count * people_per_building)
+                        self.hrs_population_vars[i].set(f"{population:,}")
                     self.status_var.set("เสร็จสิ้น")
                     self.run_button.configure(state="normal")
                 elif kind == "error":
