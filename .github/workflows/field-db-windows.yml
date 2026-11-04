@@ -61,8 +61,11 @@ jobs:
           $sites = Invoke-RestMethod http://127.0.0.1:8765/api/sites
           if ($sites.Count -ne 1) { throw "expected 1 site" }
           # second launch while running must not crash (port busy -> just opens the browser)
-          $p2 = Start-Process cmd -ArgumentList '/c', "`"$root\Start-FieldDB.bat`" --no-browser" -PassThru -Wait -WindowStyle Hidden
+          $p2 = Start-Process cmd -ArgumentList '/c', "`"$root\Start-FieldDB.bat`" --no-browser" -PassThru -WindowStyle Hidden
+          if (-not $p2.WaitForExit(30000)) { throw "second launch kept running: it bound the busy port instead of handing over" }
           if ($p2.ExitCode -ne 0) { throw "second launch failed: $($p2.ExitCode)" }
+          $sites = Invoke-RestMethod http://127.0.0.1:8765/api/sites
+          if ($sites.Count -ne 1) { throw "first server no longer answering with the same data" }
 
           # Start-Demo-Data.bat: creates demo.db with sample data on port 8766
           $d = Start-Process cmd -ArgumentList '/c', "`"$root\Start-Demo-Data.bat`" --no-browser" -PassThru -WindowStyle Hidden

@@ -200,6 +200,11 @@ class ApiTest(unittest.TestCase):
         dlat = math.radians(ring[0][1] - 13.7) * 6371008.8           # จุดแรกอยู่ทิศเหนือ ห่างเท่ารัศมี
         self.assertAlmostEqual(dlat, 500, delta=1)
 
+    def test_second_server_on_same_port_fails(self):
+        # เปิดโปรแกรมซ้ำต้องรู้ว่าพอร์ตไม่ว่าง (บน Windows ถ้าไม่ระวังจะจองซ้อนได้)
+        with self.assertRaises(OSError):
+            app.make_server("127.0.0.1", self.srv.server_address[1])
+
     def test_validation(self):
         st, r = self.call("POST", "/api/sites", {"name": ""})
         self.assertEqual(st, 400)

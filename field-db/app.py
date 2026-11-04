@@ -15,6 +15,7 @@ import io
 import json
 import os
 import re
+import socket
 import sqlite3
 import sys
 import tempfile
@@ -1265,9 +1266,20 @@ class Handler(BaseHTTPRequestHandler):
     do_GET = do_POST = do_PUT = do_DELETE = do_HEAD = handle_any
 
 
+class Server(ThreadingHTTPServer):
+    # Windows: SO_REUSEADDR ยอมให้โปรแกรมตัวที่สองจองพอร์ตเดียวกันซ้อนได้เงียบๆ (เปิดโปรแกรมซ้ำ = มีสองตัวแย่งกัน)
+    # จึงปิด reuse และขอใช้พอร์ตแบบผูกขาด ให้ตัวที่สองรู้ว่าพอร์ตไม่ว่าง แล้วเปิดเบราว์เซอร์ไปที่ตัวแรกแทน
+    allow_reuse_address = sys.platform != "win32"
+
+    def server_bind(self):
+        if sys.platform == "win32" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
 def make_server(host, port):
     init_db()
-    return ThreadingHTTPServer((host, port), Handler)
+    return Server((host, port), Handler)
 
 
 def main():
