@@ -132,15 +132,17 @@ function renderMap() {
     const g = parseGeom(s.geometry);
     if (g) {
       const isLine = g.type === 'LineString';
-      const color = st === 'exceed' ? '#ff5a45' : isLine ? '#ffd54a' : '#f6f3e8';
-      const lyr = geomLayer(g, { color, weight: isLine ? 3 : 2, dashArray: st === 'exceed' || isLine ? null : '6 4',
+      const hot = s.id === state.selectedId || state.picked.has(s.id);
+      const color = hot && isLine ? '#22d3ee' : st === 'exceed' ? '#ff5a45' : isLine ? '#ffd54a' : '#f6f3e8';
+      const lyr = geomLayer(g, { color, weight: isLine ? (hot ? 5 : 3) : 2, dashArray: st === 'exceed' || isLine ? null : '6 4',
         fillColor: st === 'exceed' ? '#ff5a45' : '#ffffff', fillOpacity: 0.12 });
       lyr.bindTooltip(`${esc(s.code || s.name)} · ${esc(measureGeom(g))}`, { sticky: true, className: 'measure-hover' });
-      lyr.on('click', () => siteClick(s.id)).addTo(siteLayer);
-      if (isLine) {   // เส้นวัดระยะ: ป้ายความยาวติดถาวรกลางเส้น เหมือน Google Earth
+      lyr.on('click', (e) => siteClick(s.id, e.latlng)).addTo(siteLayer);
+      if (isLine) {   // เส้น: ไม่มีหมุด (เหมือน path ใน Google Earth) ป้ายชื่อ + ความยาวติดกลางเส้น
         const pts = g.coordinates.map(toLL);
-        L.tooltip({ permanent: true, direction: 'center', className: 'gl measure-tip', interactive: false })
-          .setLatLng(lineMid(pts)).setContent(fmtDist(pathLen(pts))).addTo(siteLayer);
+        L.tooltip({ permanent: true, direction: 'top', offset: [0, -4], className: 'gl measure-tip', interactive: false })
+          .setLatLng(lineMid(pts)).setContent(`${esc(siteLabel(s))} · ${fmtDist(pathLen(pts))}`).addTo(siteLayer);
+        continue;
       }
     }
     if (s.lat == null || s.lng == null) continue;
@@ -663,8 +665,34 @@ function renderSites() {
 }
 
 // ------------------------------------------------- เลือกหลายจุด (แก้/ลบ/กราฟ พร้อมกัน) ---
-function siteClick(id) {
+function siteClick(id, at = null) {
+  // ระหว่างวาด/วัด/เพิ่มจุด: คลิกหมุด = ใช้ตำแหน่งหมุดนั้นพอดี (snap) แทนการเปิดรายละเอียด
+  if (state.mode && state.mode !== 'edit') {
+    const s = state.sites.find((x) => x.id === id);
+    const ll = at || (s && s.lat != null ? L.latLng(s.lat, s.lng) : null);
+    if (ll) map.fire('click', { latlng: ll });
+    return;
+  }
+  if (state.mode === 'edit') return;
   if (state.selectMode) togglePick(id); else selectSite(id);
+}
+// เชื่อมจุดที่เลือกด้วยเส้น ตามลำดับที่คลิกเลือก แล้วบอกระยะ
+function connectPicked() {
+  const list = [...state.picked].map((id) => state.sites.find((x) => x.id === id)).filter((x) => x && x.lat != null);
+  if (list.length < 2) { toast('เลือกอย่างน้อย 2 จุดที่มีพิกัด', true); return; }
+  if (!needUser()) return;
+  const pts = list.map((x) => [x.lat, x.lng]);
+  const names = list.map((x) => x.code || x.name);
+  const len = pathLen(pts);
+  const legs = list.length > 2 ? '\n' + list.slice(1).map((x, i) => `${names[i]} → ${names[i + 1]}: ${fmtDist(distM(pts[i], pts[i + 1]))}`).join('\n') : '';
+  const projects = [...new Set(list.map((x) => x.project || ''))];
+  const mid = lineMid(pts);
+  openSiteForm({
+    lat: mid[0], lng: mid[1], geometry: JSON.stringify(geomFromPts(pts, 'line')),
+    name: `ระยะ ${names.join(' – ')}`, category: 'เส้นวัดระยะ', project: projects.length === 1 ? projects[0] : '',
+    description: `เชื่อมระหว่าง ${names.join(' → ')} ระยะรวม ${fmtDist(len)}${legs}`,
+  });
+  toast(`ระยะ ${names.join(' – ')} = ${fmtDist(len)}`);
 }
 function togglePick(id) {
   if (state.picked.has(id)) state.picked.delete(id); else state.picked.add(id);
@@ -698,6 +726,7 @@ function updateBulkBar() {
   $('#bulkAll').hidden = !notPicked;
   $('#bulkClear').hidden = !n;
   ['#bulkChart', '#bulkEdit', '#bulkDelete', '#bulkHide', '#bulkShow'].forEach((b) => { $(b).disabled = !n; });
+  $('#bulkLine').disabled = n < 2;
   const nh = state.sites.filter((x) => state.hidden.has(x.id)).length;
   $('#showAll').hidden = !nh;
   $('#showAll').textContent = `ซ่อนอยู่ ${nh} จุด · แสดงทั้งหมด`;
@@ -706,6 +735,7 @@ $('#btnSelect').onclick = () => setSelectMode(!state.selectMode);
 $('#bulkDone').onclick = () => setSelectMode(false);
 $('#bulkAll').onclick = () => { filteredSites().forEach((s) => state.picked.add(s.id)); renderSites(); };
 $('#bulkClear').onclick = () => { state.picked.clear(); renderSites(); };
+$('#bulkLine').onclick = connectPicked;
 $('#bulkChart').onclick = () => TrendChart.open({ param: '', siteIds: [...state.picked] });
 
 async function restoreBatch(batch) {
