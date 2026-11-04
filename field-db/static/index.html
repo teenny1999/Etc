@@ -6,24 +6,37 @@
 <title>ฐานข้อมูลจุดเก็บตัวอย่าง</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Thai:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header class="topbar">
-  <div class="brand">🌏 ฐานข้อมูลจุดเก็บตัวอย่าง</div>
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 28 28" aria-hidden="true">
+      <rect x="1" y="1" width="26" height="26" rx="6" fill="var(--ink)"/>
+      <path d="M7 19.5 11.5 9l4 7 2.5-3.5L21 19.5Z" fill="none" stroke="var(--paper)" stroke-width="1.6" stroke-linejoin="round"/>
+      <circle cx="18.5" cy="8.5" r="2.2" fill="var(--exceed)"/>
+    </svg>
+    <div class="brand-text"><b>ฐานข้อมูลจุดเก็บตัวอย่าง</b><span>ดิน · ตะกอน · น้ำผิวดิน · น้ำใต้ดิน</span></div>
+  </div>
   <div class="top-actions">
     <label class="user-box" title="ชื่อนี้จะถูกบันทึกในประวัติการแก้ไขทุกครั้ง">
-      ผู้บันทึก <input id="userName" placeholder="ใส่ชื่อของคุณ" autocomplete="name">
+      <span>ผู้บันทึก</span><input id="userName" placeholder="ใส่ชื่อของคุณ" autocomplete="name">
     </label>
-    <button class="btn" id="btnImportKml" title="นำเข้าหมุด/พื้นที่จาก Google Earth (.kml / .kmz)">⬆ นำเข้า KML/KMZ</button>
-    <button class="btn" id="btnImportCsv" title="นำเข้าผลวิเคราะห์จากไฟล์ CSV (Excel → Save As CSV UTF-8)">⬆ นำเข้า CSV</button>
     <details class="menu">
-      <summary class="btn">⬇ ส่งออก</summary>
+      <summary class="btn ghost" data-i="upload">นำเข้า</summary>
       <div class="menu-items">
-        <a href="/api/export/kml">ไฟล์ KML (เปิดใน Google Earth)</a>
-        <a href="/api/export/csv">ผลวิเคราะห์ทั้งหมด (CSV / Excel)</a>
-        <a href="/api/export/backup">สำรองฐานข้อมูลทั้งไฟล์ (.db)</a>
+        <button id="btnImportKml"><b>KML / KMZ จาก Google Earth</b><span>หมุด เส้น และพื้นที่</span></button>
+        <button id="btnImportCsv"><b>ผลวิเคราะห์จาก CSV</b><span>ไฟล์จาก Excel แบบ CSV UTF-8</span></button>
+      </div>
+    </details>
+    <details class="menu">
+      <summary class="btn ghost" data-i="download">ส่งออก</summary>
+      <div class="menu-items">
+        <a href="/api/export/kml"><b>ไฟล์ KML</b><span>เปิดดูใน Google Earth</span></a>
+        <a href="/api/export/csv"><b>ผลวิเคราะห์ทั้งหมด (CSV)</b><span>เปิดใน Excel ได้</span></a>
+        <a href="/api/export/backup"><b>สำรองฐานข้อมูลทั้งไฟล์</b><span>ไฟล์ .db รวมรูปถ่าย</span></a>
       </div>
     </details>
     <input type="file" id="fileKml" accept=".kml,.kmz" hidden>
@@ -33,105 +46,115 @@
 
 <main class="layout">
   <aside class="sidebar" id="sidebar">
-    <nav class="tabs">
-      <button data-tab="sites" class="active">จุด / พื้นที่ <span id="cntSites" class="pill"></span></button>
-      <button data-tab="results">ผลวิเคราะห์ <span id="cntResults" class="pill"></span></button>
+    <nav class="tabs" role="tablist">
+      <span class="tab-slider" aria-hidden="true"></span>
+      <button data-tab="sites" class="active">จุด/พื้นที่ <span id="cntSites" class="count"></span></button>
+      <button data-tab="results">ผลวิเคราะห์ <span id="cntResults" class="count"></span></button>
       <button data-tab="history">ประวัติ</button>
       <button data-tab="standards">ค่ามาตรฐาน</button>
     </nav>
 
     <section class="tab-panel active" id="tab-sites">
-      <div class="row gap">
-        <button class="btn primary" id="btnAddPoint">📍 เพิ่มจุด (คลิกบนแผนที่)</button>
-        <button class="btn" id="btnAddArea">⬠ วาดพื้นที่</button>
-        <button class="btn" id="btnAddManual" title="พิมพ์พิกัดเอง (Lat/Long หรือ UTM)">⌨ ป้อนพิกัด</button>
+      <div class="add-row">
+        <button class="btn primary grow" id="btnAddPoint" data-i="pin">เพิ่มจุดบนแผนที่</button>
+        <button class="btn" id="btnAddArea" data-i="area" title="คลิกทีละมุมเพื่อวาดพื้นที่">วาดพื้นที่</button>
+        <button class="btn" id="btnAddManual" data-i="crosshair" title="พิมพ์พิกัดเอง (Lat/Long หรือ UTM)">พิกัด</button>
       </div>
-      <input id="siteSearch" class="search" type="search"
-             placeholder="ค้นหา รหัส / ชื่อ / โครงการ / สาร…  หรือพิมพ์พิกัด เช่น 13.84, 101.91 แล้วกด Enter">
-      <div class="filters">
+      <label class="search-box" data-i="search">
+        <input id="siteSearch" type="search" placeholder="ค้นหารหัส ชื่อ โครงการ หรือสาร · พิมพ์พิกัดแล้วกด Enter">
+      </label>
+      <div class="filters grid2">
         <select id="fProject"><option value="">ทุกโครงการ</option></select>
         <select id="fMedia"><option value="">ทุกประเภทตัวอย่าง</option></select>
         <select id="fStatus">
           <option value="">ทุกสถานะ</option>
-          <option value="exceed">🔴 มีค่าเกินมาตรฐาน</option>
-          <option value="ok">🟢 มีผล ไม่เกิน</option>
-          <option value="nodata">⚪ ยังไม่มีผลวิเคราะห์</option>
+          <option value="exceed">มีค่าเกินมาตรฐาน</option>
+          <option value="ok">มีผล ไม่เกินมาตรฐาน</option>
+          <option value="nodata">ยังไม่มีผลที่เทียบเกณฑ์ได้</option>
         </select>
         <select id="fSort">
-          <option value="code">เรียง: รหัส/ชื่อ</option>
-          <option value="date">เรียง: เก็บล่าสุดก่อน</option>
-          <option value="project">เรียง: โครงการ</option>
-          <option value="exceed">เรียง: เกินมาตรฐานมากสุด</option>
-          <option value="updated">เรียง: แก้ไขล่าสุด</option>
+          <option value="code">เรียงตามรหัส/ชื่อ</option>
+          <option value="date">เก็บล่าสุดก่อน</option>
+          <option value="project">เรียงตามโครงการ</option>
+          <option value="exceed">เกินมาตรฐานมากสุดก่อน</option>
+          <option value="updated">แก้ไขล่าสุดก่อน</option>
         </select>
       </div>
-      <ul class="site-list" id="siteList"></ul>
+      <ul class="site-list first" id="siteList"></ul>
     </section>
 
     <section class="tab-panel" id="tab-results">
       <div class="filters">
-        <input id="rSearch" type="search" placeholder="ค้นหา จุด / สาร / ผู้เก็บ / แล็บ…">
+        <label class="search-box grow" data-i="search"><input id="rSearch" type="search" placeholder="ค้นหาจุด สาร ผู้เก็บ แล็บ"></label>
         <select id="rMedia"><option value="">ทุกประเภทตัวอย่าง</option></select>
         <select id="rParam"><option value="">ทุกพารามิเตอร์</option></select>
         <select id="rProject"><option value="">ทุกโครงการ</option></select>
+      </div>
+      <div class="filters">
         <label class="inline">ตั้งแต่ <input type="date" id="rFrom"></label>
         <label class="inline">ถึง <input type="date" id="rTo"></label>
-        <label class="inline"><input type="checkbox" id="rExceed"> เฉพาะเกินมาตรฐาน</label>
-        <button class="btn small" id="rExport">⬇ CSV ตามตัวกรอง</button>
+        <label class="check"><input type="checkbox" id="rExceed"> เฉพาะที่เกินมาตรฐาน</label>
+        <span class="spacer"></span>
+        <span class="muted small" id="rCount"></span>
+        <button class="btn small" id="rExport" data-i="download">CSV ตามตัวกรอง</button>
       </div>
-      <div class="muted small" id="rCount"></div>
       <div class="table-wrap"><table class="data" id="resultsTable"></table></div>
     </section>
 
     <section class="tab-panel" id="tab-history">
-      <p class="muted small">ทุกการเพิ่ม / แก้ไข / ลบ ถูกเก็บไว้ทั้งหมด กด “ย้อนกลับ” เพื่อคืนข้อมูลเป็นสถานะก่อนการแก้ไขนั้น
-        (การย้อนกลับก็ถูกบันทึกเป็นประวัติด้วย จึงไม่มีข้อมูลหายถาวร)</p>
       <div class="filters">
         <select id="hEntity">
           <option value="">ทุกประเภท</option>
           <option value="site">จุด/พื้นที่</option>
-          <option value="sample">ตัวอย่าง+ผลวิเคราะห์</option>
+          <option value="sample">ตัวอย่างและผลวิเคราะห์</option>
           <option value="photo">รูปถ่าย</option>
           <option value="standard">ค่ามาตรฐาน</option>
         </select>
-        <button class="btn small" id="hReload">↻ โหลดใหม่</button>
+        <button class="btn small" id="hReload" data-i="refresh">โหลดใหม่</button>
       </div>
-      <div id="historyList"></div>
+      <p class="note">ทุกการเพิ่ม แก้ไข และลบถูกเก็บไว้ กด “ย้อนกลับ” เพื่อคืนข้อมูลเป็นสถานะก่อนการเปลี่ยนแปลงนั้น
+        การย้อนกลับก็ถูกบันทึกเป็นประวัติด้วย</p>
+      <div id="historyList" class="timeline"></div>
     </section>
 
     <section class="tab-panel" id="tab-standards">
-      <p class="muted small">ค่ามาตรฐานใช้เทียบผลวิเคราะห์อัตโนมัติ (ชื่อพารามิเตอร์ต้องตรงกับที่กรอกในผลวิเคราะห์ ไม่สนตัวพิมพ์เล็ก-ใหญ่)
-        — ประเภทตัวอย่างว่าง = ใช้กับทุกประเภท. <b>ตรวจสอบค่ากับประกาศฉบับจริงก่อนใช้งาน</b></p>
-      <div class="table-wrap"><table class="data" id="stdTable"></table></div>
-      <button class="btn" id="stdAdd">+ เพิ่มค่ามาตรฐาน</button>
+      <p class="note">ใช้เทียบผลวิเคราะห์อัตโนมัติ ชื่อพารามิเตอร์ต้องตรงกับที่กรอกในผลวิเคราะห์ (ไม่สนตัวพิมพ์เล็ก-ใหญ่)
+        ประเภทตัวอย่างว่าง = ใช้กับทุกประเภท · <b>ตรวจค่ากับประกาศฉบับจริงก่อนใช้งาน</b></p>
+      <div class="table-wrap"><table class="data std" id="stdTable"></table></div>
+      <div><button class="btn" id="stdAdd" data-i="plus">เพิ่มค่ามาตรฐาน</button></div>
     </section>
   </aside>
 
   <div class="map-wrap">
     <div id="map"></div>
-    <div class="map-toolbar">
-      <label><input type="checkbox" id="showLabels" checked> ป้ายชื่อ</label>
-      <select id="labelField">
-        <option value="code">ป้าย: รหัส</option>
-        <option value="name">ป้าย: ชื่อ</option>
-        <option value="both">ป้าย: รหัส + ชื่อ</option>
+    <div class="map-toolbar glass">
+      <label class="check"><input type="checkbox" id="showLabels" checked> ป้ายชื่อ</label>
+      <select id="labelField" aria-label="ข้อความบนป้าย">
+        <option value="code">รหัส</option>
+        <option value="name">ชื่อ</option>
+        <option value="both">รหัส + ชื่อ</option>
       </select>
-      <button class="btn small" id="btnFit">⤢ ดูทุกจุด</button>
+      <button class="btn small on-glass" id="btnFit" data-i="fit">ดูทุกจุด</button>
     </div>
-    <div class="mode-bar" id="modeBar" hidden>
+    <div class="legend glass" aria-label="สัญลักษณ์">
+      <span><i class="dot exceed"></i>เกินมาตรฐาน</span>
+      <span><i class="dot ok"></i>ผ่าน</span>
+      <span><i class="dot nodata"></i>ยังไม่มีผลเทียบเกณฑ์</span>
+    </div>
+    <div class="mode-bar glass" id="modeBar" hidden>
       <span id="modeText"></span>
-      <button class="btn small primary" id="modeFinish" hidden>✔ เสร็จ</button>
-      <button class="btn small" id="modeUndo" hidden>↶ ลบจุดล่าสุด</button>
-      <button class="btn small" id="modeCancel">✖ ยกเลิก</button>
+      <button class="btn small light" id="modeFinish" data-i="check" hidden>เสร็จ</button>
+      <button class="btn small on-glass" id="modeUndo" data-i="undo" hidden>ลบมุมล่าสุด</button>
+      <button class="btn small on-glass" id="modeCancel" data-i="x">ยกเลิก</button>
     </div>
-    <div class="coord-readout" id="coordReadout"></div>
+    <div class="coord-readout glass" id="coordReadout"></div>
     <aside class="detail" id="detail" hidden></aside>
   </div>
 </main>
 
 <div class="modal" id="modal" hidden>
-  <div class="modal-box">
-    <button class="modal-close" id="modalClose" aria-label="ปิด">✕</button>
+  <div class="modal-box" role="dialog" aria-modal="true">
+    <button class="icon-btn modal-close" id="modalClose" aria-label="ปิด" data-i="x"></button>
     <div id="modalBody"></div>
   </div>
 </div>
@@ -147,6 +170,7 @@
 <datalist id="dlLabs"></datalist>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="icons.js"></script>
 <script src="utm.js"></script>
 <script src="app.js"></script>
 </body>

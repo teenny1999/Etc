@@ -98,6 +98,19 @@ class ApiTest(unittest.TestCase):
         st, _ = self.call("POST", f"/api/history/{hist[-1]['id']}/restore")
         self.assertEqual(st, 400)
 
+    def test_surface_soil_uses_soil_standard_and_unchecked_is_not_green(self):
+        self.call("POST", "/api/standards", {"media": "soil", "parameter": "Zn", "max": 100})
+        _, a = self.call("POST", "/api/sites", {"name": "ดินผิว", "lat": 13, "lng": 101})
+        self.call("POST", "/api/samples", {"site_id": a["id"], "media": "surface_soil",
+                                           "results": [{"parameter": "Zn", "value_text": "250"}]})
+        _, b = self.call("POST", "/api/sites", {"name": "ไม่มีเกณฑ์", "lat": 13, "lng": 101})
+        self.call("POST", "/api/samples", {"site_id": b["id"], "media": "air",
+                                           "results": [{"parameter": "XYZ", "value_text": "1"}]})
+        _, sites = self.call("GET", "/api/sites")
+        by = {s["id"]: s for s in sites}
+        self.assertEqual(by[a["id"]]["n_exceed"], 1)       # ดินผิวหน้าใช้เกณฑ์ดิน
+        self.assertEqual(by[b["id"]]["n_compared"], 0)     # มีผลแต่ไม่มีเกณฑ์ = ไม่ใช่ "ผ่าน"
+
     def test_validation(self):
         st, r = self.call("POST", "/api/sites", {"name": ""})
         self.assertEqual(st, 400)

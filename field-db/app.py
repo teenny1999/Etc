@@ -398,9 +398,15 @@ def load_standards(con):
     return out
 
 
+# ประเภทที่ไม่มีค่ามาตรฐานของตัวเอง ให้ใช้ของประเภทแม่ (เช่น ดินผิวหน้า -> ดิน)
+MEDIA_FALLBACK = {"surface_soil": "soil"}
+
+
 def find_standard(stds, media, parameter):
     key = (parameter or "").strip().lower()
-    return stds.get((media or "", key)) or stds.get(("", key))
+    media = media or ""
+    return (stds.get((media, key)) or stds.get((MEDIA_FALLBACK.get(media, ""), key))
+            or stds.get(("", key)))
 
 
 def exceed_flag(std, value):
@@ -445,7 +451,7 @@ def list_sites(con):
     sites = {r["id"]: dict(r) for r in con.execute(
         "SELECT * FROM sites WHERE deleted=0 ORDER BY COALESCE(code,''), name")}
     for s in sites.values():
-        s.update(n_samples=0, n_photos=0, last_date=None, media=[], n_exceed=0, exceed_params=[])
+        s.update(n_samples=0, n_photos=0, last_date=None, media=[], n_exceed=0, n_compared=0, exceed_params=[])
     for r in con.execute("SELECT site_id, COUNT(*) n, MAX(sample_date) d, GROUP_CONCAT(DISTINCT media) m "
                          "FROM samples WHERE deleted=0 GROUP BY site_id"):
         if r["site_id"] in sites:
@@ -455,6 +461,8 @@ def list_sites(con):
         if r["site_id"] in sites:
             sites[r["site_id"]]["n_photos"] = r["n"]
     for r in all_results(con):
+        if r["exceed"] is not None and r["site_id"] in sites:
+            sites[r["site_id"]]["n_compared"] += 1
         if r["exceed"] and r["site_id"] in sites:
             s = sites[r["site_id"]]
             s["n_exceed"] += 1

@@ -58,7 +58,9 @@ async function api(method, url, body, headers = {}) {
 let toastTimer;
 function toast(msg, err = false) {
   const t = $('#toast');
-  t.textContent = msg; t.className = 'toast' + (err ? ' err' : ''); t.hidden = false;
+  t.innerHTML = ic(err ? 'alert' : 'check') + `<span>${esc(msg)}</span>`;
+  t.className = 'toast' + (err ? ' err' : '');
+  t.hidden = true; void t.offsetWidth; t.hidden = false;  // เล่นแอนิเมชันใหม่ทุกครั้ง
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.hidden = true; }, err ? 6000 : 3000);
 }
@@ -100,7 +102,7 @@ const markers = new Map();
 
 function siteStatus(s) {
   if (s.n_exceed > 0) return 'exceed';
-  if (s.n_samples > 0) return 'ok';
+  if (s.n_compared > 0) return 'ok';  // เขียว = มีค่าที่เทียบมาตรฐานได้จริงและผ่านทั้งหมด
   return 'nodata';
 }
 function siteLabel(s) {
@@ -111,29 +113,40 @@ function siteLabel(s) {
 }
 function parseGeom(g) { try { return g ? JSON.parse(g) : null; } catch { return null; } }
 
+// หมุดที่ต้อง "ตกลงมา": ทุกหมุดตอนเปิดครั้งแรก (ไล่ทีละนิด รวมไม่เกิน 0.6 วิ) และหมุดที่เพิ่งสร้าง
+const drop = { first: true, ids: new Set() };
 function renderMap() {
   siteLayer.clearLayers();
   markers.clear();
-  for (const s of filteredSites()) {
+  let n = 0;
+  const list = filteredSites();
+  const step = Math.min(40, 600 / Math.max(list.length, 1));
+  for (const s of list) {
     const st = siteStatus(s);
     const g = parseGeom(s.geometry);
     if (g) {
       L.geoJSON(g, {
-        style: { color: st === 'exceed' ? '#ff5252' : '#ffeb3b', weight: 2.5, fillOpacity: 0.12 },
+        style: { color: st === 'exceed' ? '#ff5a45' : '#f6f3e8', weight: 2, dashArray: st === 'exceed' ? null : '6 4', fillColor: st === 'exceed' ? '#ff5a45' : '#ffffff', fillOpacity: 0.12 },
         pointToLayer: (f, ll) => L.circleMarker(ll, { radius: 4 }),
       }).on('click', () => selectSite(s.id)).addTo(siteLayer);
     }
     if (s.lat == null || s.lng == null) continue;
     const icon = L.divIcon({
-      className: 'pin-wrap', iconSize: [22, 24], iconAnchor: [4, 24],
-      html: `<div class="pin ${st}${s.id === state.selectedId ? ' sel' : ''}"></div>`,
+      className: 'pin-wrap', iconSize: [22, 22], iconAnchor: [11, 11],
+      html: (() => {
+        const dropping = drop.first || drop.ids.has(s.id);
+        const delay = drop.first ? ` style="animation-delay:${Math.round(n++ * step)}ms"` : '';
+        return `<div class="pin ${st}${s.id === state.selectedId ? ' sel' : ''}${dropping ? ' drop' : ''}"${delay}></div>`;
+      })(),
     });
     const m = L.marker([s.lat, s.lng], { icon, title: [s.code, s.name].filter(Boolean).join(' — ') })
-      .bindTooltip(esc(siteLabel(s)), { permanent: true, direction: 'right', className: 'gl', offset: [10, -14] })
+      .bindTooltip(esc(siteLabel(s)), { permanent: true, direction: 'right', className: 'gl', offset: [8, 0] })
       .on('click', () => selectSite(s.id))
       .addTo(siteLayer);
     markers.set(s.id, m);
   }
+  if (list.length) drop.first = false;
+  drop.ids.clear();
 }
 
 function fitAll() {
@@ -306,23 +319,30 @@ function filteredSites() {
   return list.sort(sorters[sort] || sorters.code);
 }
 
+const chip = (m) => `<span class="chip m-${esc(m || 'other')}">${esc(mediaLabel(m))}</span>`;
+
 function renderSites() {
   const list = filteredSites();
-  $('#cntSites').textContent = state.sites.length;
-  $('#siteList').innerHTML = list.length ? list.map((s) => {
+  $('#cntSites').textContent = state.sites.length || '';
+  const ul = $('#siteList');
+  ul.innerHTML = list.length ? list.map((s, i) => {
     const st = siteStatus(s);
     const sub = [
-      s.project, s.category,
-      s.n_samples ? `${s.n_samples} ตัวอย่าง · ล่าสุด ${fmtDate(s.last_date)}` : 'ยังไม่มีตัวอย่าง',
-      s.n_photos ? `📷 ${s.n_photos}` : '',
-    ].filter(Boolean).join(' · ');
-    const exc = s.n_exceed ? `<div class="s" style="color:var(--red)">เกินมาตรฐาน: ${esc(s.exceed_params.join(', '))}</div>` : '';
-    const media = s.media.map((m) => `<span class="badge media">${esc(mediaLabel(m))}</span>`).join(' ');
-    return `<li data-id="${s.id}" class="${s.id === state.selectedId ? 'sel' : ''}">
-      <span class="dot ${st}"></span>
-      <div><div class="t">${esc(s.code ? s.code + ' — ' : '')}${esc(s.name)} ${s.geometry ? '⬠' : ''}</div>
-      <div class="s">${esc(sub)}</div>${exc}<div>${media}</div></div></li>`;
-  }).join('') : '<li class="muted">ไม่พบข้อมูล — เพิ่มจุดใหม่ หรือ นำเข้าไฟล์ KML/KMZ จาก Google Earth</li>';
+      s.project && `<span>${esc(s.project)}</span>`,
+      s.category && `<span>${esc(s.category)}</span>`,
+      `<span>${s.n_samples ? `${s.n_samples} ตัวอย่าง · ล่าสุด ${esc(fmtDate(s.last_date))}` : 'ยังไม่มีตัวอย่าง'}</span>`,
+      s.n_photos ? `<span title="รูปถ่าย">${ic('image')}${s.n_photos}</span>` : '',
+    ].filter(Boolean).join('');
+    const exc = s.n_exceed ? `<div class="ex">เกินมาตรฐาน ${s.n_exceed} ค่า · ${esc(s.exceed_params.join(', '))}</div>` : '';
+    const chips = s.media.length ? `<div class="chips">${s.media.map(chip).join('')}</div>` : '';
+    const delay = ul.classList.contains('first') ? ` style="animation-delay:${Math.min(i * 30, 450)}ms"` : '';
+    return `<li data-id="${s.id}" class="${s.id === state.selectedId ? 'sel' : ''}"${delay}>
+      <span class="dot ${st}" title="${{ exceed: 'เกินมาตรฐาน', ok: 'ผ่านเกณฑ์', nodata: 'ยังไม่มีผลที่เทียบเกณฑ์ได้' }[st]}"></span>
+      <div style="min-width:0"><div class="t">${s.code ? `<span class="code">${esc(s.code)}</span>` : ''}<span class="name">${esc(s.name)}</span>${s.geometry ? ic('area') : ''}</div>
+      <div class="s">${sub}</div>${exc}${chips}</div></li>`;
+  }).join('') : `<li class="empty">${state.sites.length ? 'ไม่มีจุดที่ตรงกับคำค้นหรือตัวกรอง'
+    : 'ยังไม่มีข้อมูล<br>กด “เพิ่มจุดบนแผนที่” หรือนำเข้าไฟล์ KML/KMZ จาก Google Earth'}</li>`;
+  if (list.length) setTimeout(() => ul.classList.remove('first'), 800);
   renderMap();
 }
 $('#siteList').addEventListener('click', (e) => {
@@ -337,7 +357,7 @@ $('#siteSearch').addEventListener('keydown', (e) => {
   if (m) {
     const lat = +m[1], lng = +m[2];
     map.setView([lat, lng], 16);
-    L.popup().setLatLng([lat, lng]).setContent(`${lat}, ${lng}<br><button class="btn small" id="popAdd">📍 เพิ่มจุดที่นี่</button>`).openOn(map);
+    L.popup().setLatLng([lat, lng]).setContent(`${lat}, ${lng}<br><button class="btn small" id="popAdd" style="margin-top:6px">${ic('pin')}เพิ่มจุดที่นี่</button>`).openOn(map);
     setTimeout(() => { const b = $('#popAdd'); if (b) b.onclick = () => { map.closePopup(); openSiteForm({ lat, lng }); }; });
     e.target.value = ''; renderSites();
   } else {
@@ -371,45 +391,73 @@ function closeDetail() {
   $('#detail').hidden = true; state.selectedId = null; state.detail = null; renderSites();
 }
 
-function resultStatusBadge(r) {
-  if (r.exceed === 1) return '<span class="badge exceed">เกิน</span>';
-  if (r.exceed === -1) return '<span class="badge low">ต่ำกว่าเกณฑ์</span>';
-  if (r.exceed === 0) return '<span class="badge ok">ผ่าน</span>';
-  return '';
-}
 function stdText(r) {
   if (r.std_min == null && r.std_max == null) return '';
   if (r.std_min != null && r.std_max != null) return `${r.std_min}–${r.std_max}`;
   return r.std_max != null ? `≤ ${r.std_max}` : `≥ ${r.std_min}`;
 }
+// คำตัดสินสั้นๆ: "เกิน 2.4×" บอกว่าเกินมากแค่ไหน ไม่ใช่แค่เกินหรือไม่
+function verdict(r) {
+  if (r.exceed === 1) {
+    const x = r.std_max ? r.value / r.std_max : null;
+    return `<span class="verdict exceed">เกิน${x && x >= 1.05 ? ` ${x >= 10 ? Math.round(x) : x.toFixed(1)}×` : ''}</span>`;
+  }
+  if (r.exceed === -1) return '<span class="verdict low">ต่ำกว่าเกณฑ์</span>';
+  if (r.exceed === 0) return '<span class="verdict ok">ผ่าน</span>';
+  return '<span class="verdict muted">–</span>';
+}
+// เกจเทียบค่ากับมาตรฐาน: ขีดดำ = ค่ามาตรฐาน, แถบ = ค่าที่วัดได้ (สเกล 0 ถึง 1.5 เท่าของเกณฑ์)
+function gauge(r) {
+  if (r.value == null || (r.std_min == null && r.std_max == null)) return '';
+  const top = (r.std_max ?? r.std_min) * 1.5 || 1;
+  const pct = (v) => Math.max(0, Math.min(100, (v / top) * 100));
+  const cls = r.exceed === 1 ? 'exceed' : r.exceed === -1 ? 'low' : 'ok';
+  const ticks = [r.std_min, r.std_max].filter((v) => v != null && v > 0)
+    .map((v) => `<i class="tick" style="left:${pct(v).toFixed(1)}%"></i>`).join('');
+  const over = r.value > top ? '<i class="over"></i>' : '';
+  return `<span class="gauge ${cls}" title="ค่า ${esc(r.value_text)} เทียบเกณฑ์ ${esc(stdText(r))}"><i class="fill" style="width:${pct(r.value).toFixed(1)}%"></i>${ticks}${over}</span>`;
+}
+const compareCell = (r) => `<span class="cmp">${gauge(r)}${verdict(r)}</span>`;
 
 function renderDetail() {
   const d = state.detail;
   const el = $('#detail');
+  const entering = el.hidden;
   el.hidden = false;
+  el.classList.toggle('enter', entering);
   const u = d.lat != null ? UTM.toUTM(d.lat, d.lng) : null;
+  const site = state.sites.find((x) => x.id === d.id) || { n_exceed: 0, n_samples: d.samples.length, exceed_params: [] };
+  const st = siteStatus(site);
+  const strip = {
+    exceed: `${ic('alert')}<div><b>เกินมาตรฐาน ${site.n_exceed} ค่า</b> — ${esc(site.exceed_params.join(', '))}</div>`,
+    ok: `${ic('check')}<div><b>ผลวิเคราะห์ทั้งหมดอยู่ในเกณฑ์</b> จาก ${d.samples.length} ครั้งที่เก็บ</div>`,
+    nodata: d.samples.some((x) => x.results.length)
+      ? `${ic('flask')}<div>มีผลวิเคราะห์ แต่ยังไม่มีค่ามาตรฐานให้เทียบ เพิ่มได้ในแท็บ “ค่ามาตรฐาน”</div>`
+      : `${ic('flask')}<div>ยังไม่มีผลวิเคราะห์ เพิ่มตัวอย่างแรกได้ที่ด้านล่าง</div>`,
+  }[st];
   const kv = [
-    ['ประเภทจุด', d.category], ['โครงการ', d.project], ['จังหวัด', d.province], ['ที่ตั้ง', d.address],
-    ['พิกัด', d.lat != null ? `${d.lat.toFixed(6)}, ${d.lng.toFixed(6)}` : 'ไม่ระบุ'],
-    ['UTM', u ? `โซน ${u.zone}${u.south ? 'S' : 'N'}  E ${u.E.toFixed(0)}  N ${u.N.toFixed(0)}` : ''],
+    ['โครงการ', d.project], ['จังหวัด', d.province], ['ที่ตั้ง', d.address],
+    ['พิกัด', d.lat != null ? `${d.lat.toFixed(6)}, ${d.lng.toFixed(6)}` : 'ไม่ระบุ', true],
+    ['UTM', u ? `${u.zone}${u.south ? 'S' : 'N'}  E ${u.E.toFixed(0)}  N ${u.N.toFixed(0)}` : '', true],
     ['รายละเอียด', d.description], ['แก้ไขล่าสุด', fmtDateTime(d.updated_at)],
   ].filter(([, v]) => v);
   const gmaps = d.lat != null ? `https://www.google.com/maps?q=${d.lat},${d.lng}` : null;
 
   const samples = d.samples.map((s) => {
     const rows = s.results.map((r) => `<tr class="${r.exceed === 1 ? 'exceed' : ''}">
-      <td>${esc(r.parameter)}</td><td class="num val">${esc(r.value_text)}</td><td>${esc(r.unit)}</td>
-      <td class="num muted">${esc(stdText(r))}</td><td>${resultStatusBadge(r)}</td></tr>`).join('');
+      <td>${esc(r.parameter)}</td><td class="num val">${esc(r.value_text)}</td><td class="muted">${esc(r.unit)}</td>
+      <td class="num std-text">${esc(stdText(r))}</td><td>${compareCell(r)}</td></tr>`).join('');
     const meta = [s.sample_code && `รหัส ${s.sample_code}`, s.depth && `ลึก ${s.depth}`, s.sampler && `ผู้เก็บ ${s.sampler}`,
       s.lab && `แล็บ ${s.lab}`, s.report_no && `รายงาน ${s.report_no}`].filter(Boolean).join(' · ');
     return `<div class="sample-card">
-      <header><div><span class="badge media">${esc(mediaLabel(s.media))}</span> <b>${esc(fmtDate(s.sample_date) || 'ไม่ระบุวันที่')}</b>
-        <div class="meta">${esc(meta)}</div></div>
-        <div class="row gap"><button class="btn small" data-act="edit-sample" data-id="${s.id}">แก้ไข</button>
-        <button class="btn small" data-act="hist-sample" data-id="${s.id}" title="ประวัติการแก้ไขของตัวอย่างนี้">🕘</button></div></header>
-      ${s.notes ? `<div class="meta">${esc(s.notes)}</div>` : ''}
-      ${rows ? `<table class="data"><thead><tr><th>พารามิเตอร์</th><th>ค่า</th><th>หน่วย</th><th>มาตรฐาน</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
-        : '<div class="meta">ยังไม่มีผลวิเคราะห์</div>'}
+      <header><div><div class="when">${chip(s.media)}<span class="date">${esc(fmtDate(s.sample_date) || 'ไม่ระบุวันที่')}</span></div>
+        ${meta ? `<div class="meta">${esc(meta)}</div>` : ''}</div>
+        <div style="display:flex;gap:2px;flex:none">
+          <button class="icon-btn" data-act="hist-sample" data-id="${s.id}" title="ประวัติการแก้ไขของตัวอย่างนี้" aria-label="ประวัติการแก้ไข">${ic('history')}</button>
+          <button class="btn small" data-act="edit-sample" data-id="${s.id}">${ic('edit')}แก้ไข</button></div></header>
+      ${s.notes ? `<div class="notes">${esc(s.notes)}</div>` : ''}
+      ${rows ? `<table class="data"><thead><tr><th>พารามิเตอร์</th><th style="text-align:right">ค่า</th><th>หน่วย</th><th style="text-align:right">เกณฑ์</th><th>เทียบเกณฑ์</th></tr></thead><tbody>${rows}</tbody></table>`
+        : '<div class="empty-res">ยังไม่มีผลวิเคราะห์</div>'}
     </div>`;
   }).join('');
 
@@ -418,27 +466,34 @@ function renderDetail() {
       <figcaption>${esc(p.caption || fmtDate(p.taken_at) || p.filename || '')}</figcaption></figure>`).join('');
 
   el.innerHTML = `
-    <button class="close" data-act="close" aria-label="ปิด">✕</button>
-    <h2>${esc(d.code ? d.code + ' — ' : '')}${esc(d.name)}</h2>
-    <div class="row gap" style="margin:8px 0">
-      <button class="btn small" data-act="edit">✎ แก้ไขข้อมูล</button>
-      <button class="btn small" data-act="move">✥ ย้ายหมุด</button>
-      <button class="btn small" data-act="draw">⬠ ${d.geometry ? 'วาดพื้นที่ใหม่' : 'วาดขอบเขตพื้นที่'}</button>
-      ${gmaps ? `<a class="btn small" href="${gmaps}" target="_blank" rel="noopener">นำทาง ↗</a>` : ''}
-      <button class="btn small danger" data-act="delete">🗑 ลบ</button>
+    <div class="detail-head">
+      <button class="icon-btn close" data-act="close" aria-label="ปิด">${ic('x')}</button>
+      <div class="kicker">${d.code ? `<span class="mono">${esc(d.code)}</span>` : ''}${d.category ? `<span>${esc(d.category)}</span>` : ''}</div>
+      <h2>${esc(d.name)}</h2>
+      <div class="detail-actions">
+        <button class="btn small" data-act="edit">${ic('edit')}แก้ไขข้อมูล</button>
+        <button class="btn small" data-act="move">${ic('move')}ย้ายหมุด</button>
+        <button class="btn small" data-act="draw">${ic('area')}${d.geometry ? 'วาดพื้นที่ใหม่' : 'วาดขอบเขต'}</button>
+        ${gmaps ? `<a class="btn small" href="${gmaps}" target="_blank" rel="noopener">นำทาง${ic('external')}</a>` : ''}
+        <button class="btn small danger" data-act="delete" style="margin-left:auto">${ic('trash')}ลบ</button>
+      </div>
     </div>
-    <dl class="kv">${kv.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>
+    <div class="detail-body">
+      <div class="status-strip ${st}">${strip}</div>
+      <dl class="kv">${kv.map(([k, v, mono]) => `<dt>${esc(k)}</dt><dd class="${mono ? 'mono' : ''}">${esc(v)}</dd>`).join('')}</dl>
 
-    <h3>รูปถ่าย (${d.photos.length})
-      <label class="btn small primary">+ เพิ่มรูป<input type="file" accept="image/*" multiple hidden data-act="upload"></label></h3>
-    ${photos ? `<div class="photos">${photos}</div>` : '<div class="muted small">ยังไม่มีรูป</div>'}
+      <div class="sec-h"><span>ตัวอย่างและผลวิเคราะห์<span class="n">${d.samples.length}</span></span>
+        <button class="btn small primary" data-act="add-sample">${ic('plus')}เพิ่มตัวอย่าง</button></div>
+      ${samples || '<div class="empty-box">ยังไม่มีการเก็บตัวอย่างที่จุดนี้</div>'}
 
-    <h3>ตัวอย่าง / ผลวิเคราะห์ (${d.samples.length})
-      <button class="btn small primary" data-act="add-sample">+ เพิ่มตัวอย่าง</button></h3>
-    ${samples || '<div class="muted small">ยังไม่มีการเก็บตัวอย่าง</div>'}
+      <div class="sec-h"><span>รูปถ่าย<span class="n">${d.photos.length}</span></span>
+        <label class="btn small">${ic('upload')}เพิ่มรูป<input type="file" accept="image/*" multiple hidden data-act="upload"></label></div>
+      ${photos ? `<div class="photos">${photos}</div>` : '<div class="empty-box">ยังไม่มีรูป · ถ่ายจากมือถือแล้วอัปโหลดเข้าจุดนี้ได้เลย</div>'}
 
-    <h3>ประวัติการแก้ไข <button class="btn small" data-act="history">แสดง</button></h3>
-    <div id="detailHistory"></div>`;
+      <div class="sec-h"><span>ประวัติการแก้ไข</span>
+        <button class="btn small" data-act="history">${ic('history')}แสดงประวัติ</button></div>
+      <div id="detailHistory" class="timeline"></div>
+    </div>`;
 }
 
 $('#detail').addEventListener('click', (e) => {
@@ -518,23 +573,23 @@ function openLightbox(idx) {
   const sampleOpts = state.detail.samples.map((s) =>
     `<option value="${s.id}" ${s.id === p.sample_id ? 'selected' : ''}>${esc(mediaLabel(s.media))} ${esc(fmtDate(s.sample_date))} ${esc(s.sample_code || '')}</option>`).join('');
   lb.innerHTML = `
-    ${idx > 0 ? '<button class="nav" style="left:10px" data-go="-1">‹</button>' : ''}
-    ${idx < photos.length - 1 ? '<button class="nav" style="right:10px" data-go="1">›</button>' : ''}
+    ${idx > 0 ? `<button class="nav" style="left:14px" data-go="-1" aria-label="รูปก่อนหน้า">${ic('left')}</button>` : ''}
+    ${idx < photos.length - 1 ? `<button class="nav" style="right:14px" data-go="1" aria-label="รูปถัดไป">${ic('right')}</button>` : ''}
     <img src="/api/photos/${p.id}" alt="">
     <div class="bar">
       <input id="lbCaption" value="${esc(p.caption || '')}" placeholder="คำบรรยายรูป" style="width:260px">
       <input id="lbDate" type="date" value="${esc((p.taken_at || '').slice(0, 10))}">
       <select id="lbSample"><option value="">— ไม่ผูกกับตัวอย่าง —</option>${sampleOpts}</select>
-      <button class="btn" id="lbSave">บันทึก</button>
+      <button class="btn light" id="lbSave">${ic('check')}บันทึก</button>
       <a class="btn" href="/api/photos/${p.id}" download="${esc(p.filename || 'photo.jpg')}">⬇</a>
-      <button class="btn danger" id="lbDel">ลบรูป</button>
-      <button class="btn" id="lbClose">ปิด ✕</button>
+      <button class="btn on-glass" id="lbDel">${ic('trash')}ลบรูป</button>
+      <button class="btn on-glass" id="lbClose">${ic('x')}ปิด</button>
     </div>
-    <div class="small" style="opacity:.7;margin-top:4px">${idx + 1} / ${photos.length} · ${esc(p.filename || '')}</div>`;
+    <div class="info">${idx + 1} / ${photos.length} · ${esc(p.filename || '')}</div>`;
   lb.hidden = false;
   lb.onclick = (e) => {
-    if (e.target === lb || e.target.id === 'lbClose') lb.hidden = true;
-    const go = e.target.dataset.go;
+    if (e.target === lb || e.target.closest('#lbClose')) lb.hidden = true;
+    const go = e.target.closest('[data-go]')?.dataset.go;
     if (go) openLightbox(idx + +go);
   };
   $('#lbSave').onclick = () => {
@@ -595,7 +650,7 @@ function openSiteForm(s) {
             <label>UTM E (Easting)<input id="uE" inputmode="decimal" value="${u.E ? u.E.toFixed(0) : ''}"></label>
             <label>UTM N (Northing)<input id="uN" inputmode="decimal" value="${u.N ? u.N.toFixed(0) : ''}"></label>
           </div>
-          <div class="muted small" style="margin-top:4px">กรอกแบบใดแบบหนึ่ง ระบบจะแปลงให้อีกแบบอัตโนมัติ (WGS84)
+          <div class="cap">กรอกแบบใดแบบหนึ่ง ระบบจะแปลงให้อีกแบบอัตโนมัติ (WGS84)
             ${s.geometry ? ' · จุดนี้มีรูปร่างพื้นที่ (polygon) อยู่แล้ว' : ''}</div>
         </div>
         <label class="full">รายละเอียด / หมายเหตุ<textarea name="description" rows="3">${esc(s.description || '')}</textarea></label>
@@ -603,7 +658,7 @@ function openSiteForm(s) {
       <input type="hidden" name="geometry" value="${esc(s.geometry || '')}">
       <div class="form-actions">
         <button type="button" class="btn" id="cancelSite">ยกเลิก</button>
-        <button class="btn primary">${isNew ? 'บันทึกจุดใหม่' : 'บันทึกการแก้ไข'}</button>
+        <button class="btn primary">${ic('check')}${isNew ? 'บันทึกจุดใหม่' : 'บันทึกการแก้ไข'}</button>
       </div>
     </form>`);
   const form = $('#siteForm');
@@ -632,7 +687,8 @@ function openSiteForm(s) {
     guard(async () => {
       const r = isNew ? await api('POST', '/api/sites', data) : await api('PUT', `/api/sites/${s.id}`, data);
       closeModal();
-      toast(isNew ? 'เพิ่มจุดแล้ว' : 'บันทึกแล้ว');
+      toast(isNew ? `เพิ่มจุด ${data.code || data.name} แล้ว` : 'บันทึกการแก้ไขแล้ว');
+      if (isNew) drop.ids.add(r.id);
       await reloadAll();
       await selectSite(r.id, isNew);
     });
@@ -646,7 +702,7 @@ function resultRow(r = {}) {
     <td><input name="value_text" value="${esc(r.value_text ?? '')}" placeholder="เช่น 0.05, <0.01, ND"></td>
     <td><input name="unit" value="${esc(r.unit || '')}" placeholder="mg/kg"></td>
     <td><input name="method" value="${esc(r.method || '')}"></td>
-    <td><button type="button" class="btn small danger" data-del-row title="ลบแถว">✕</button></td></tr>`;
+    <td><button type="button" class="icon-btn" data-del-row title="ลบแถว" aria-label="ลบแถว">${ic('x')}</button></td></tr>`;
 }
 function openSampleForm(s) {
   const isNew = !s.id;
@@ -672,19 +728,19 @@ function openSampleForm(s) {
       <div class="table-wrap"><table class="data results-grid">
         <thead><tr><th>พารามิเตอร์ / สาร</th><th>ค่าที่วัดได้</th><th>หน่วย</th><th>วิธีวิเคราะห์</th><th></th></tr></thead>
         <tbody id="resRows">${results}</tbody></table></div>
-      <div class="row gap" style="margin-top:6px">
-        <button type="button" class="btn small" id="addRow">+ เพิ่มแถว</button>
+      <div class="tool-row">
+        <button type="button" class="btn small" id="addRow">${ic('plus')}เพิ่มแถว</button>
         <button type="button" class="btn small" id="fillStd" title="เติมรายการพารามิเตอร์ที่มีค่ามาตรฐานของประเภทตัวอย่างนี้">เติมพารามิเตอร์จากค่ามาตรฐาน</button>
-        <button type="button" class="btn small" id="pasteBtn">📋 วางจาก Excel</button>
+        <button type="button" class="btn small" id="pasteBtn">${ic('clipboard')}วางจาก Excel</button>
       </div>
       <div id="pasteBox" hidden style="margin-top:6px">
         <textarea id="pasteText" rows="4" placeholder="คัดลอกคอลัมน์จาก Excel มาวาง: พารามิเตอร์ [Tab] ค่า [Tab] หน่วย (ทีละบรรทัด)"></textarea>
         <button type="button" class="btn small" id="pasteApply">เพิ่มจากข้อความที่วาง</button>
       </div>
       <div class="form-actions">
-        ${isNew ? '' : '<button type="button" class="btn danger" id="delSample" style="margin-right:auto">🗑 ลบตัวอย่างนี้</button>'}
+        ${isNew ? '' : `<button type="button" class="btn danger" id="delSample" style="margin-right:auto">${ic('trash')}ลบตัวอย่างนี้</button>`}
         <button type="button" class="btn" id="cancelSample">ยกเลิก</button>
-        <button class="btn primary">บันทึก</button>
+        <button class="btn primary">${ic('check')}${isNew ? 'บันทึกตัวอย่าง' : 'บันทึกการแก้ไข'}</button>
       </div>
     </form>`);
   const form = $('#sampleForm');
@@ -757,12 +813,15 @@ function openSampleForm(s) {
 
 // ---------------------------------------------------------- results tab ---
 const RESULT_COLS = [
-  { key: 'site_code', label: 'รหัสจุด' }, { key: 'site_name', label: 'ชื่อจุด' }, { key: 'project', label: 'โครงการ' },
-  { key: 'sample_date', label: 'วันที่เก็บ', fmt: fmtDate }, { key: 'media', label: 'ประเภท', fmt: mediaLabel },
-  { key: 'sample_code', label: 'รหัสตัวอย่าง' }, { key: 'depth', label: 'ความลึก' }, { key: 'parameter', label: 'พารามิเตอร์' },
+  { key: 'site_code', label: 'รหัสจุด', code: true }, { key: 'site_name', label: 'ชื่อจุด', clip: 1 },
+  { key: 'sample_date', label: 'วันที่เก็บ', fmt: fmtDate }, { key: 'media', label: 'ประเภท', html: (r) => chip(r.media) },
+  { key: 'parameter', label: 'พารามิเตอร์' },
   { key: 'value', label: 'ค่า', num: true, show: (r) => r.value_text }, { key: 'unit', label: 'หน่วย' },
-  { key: 'std', label: 'มาตรฐาน', show: stdText, sortVal: (r) => r.std_max ?? r.std_min },
-  { key: 'exceed', label: 'สถานะ', html: resultStatusBadge }, { key: 'sampler', label: 'ผู้เก็บ' }, { key: 'lab', label: 'แล็บ' },
+  { key: 'std', label: 'เกณฑ์', num: true, show: stdText, sortVal: (r) => r.std_max ?? r.std_min },
+  { key: 'ratio', label: 'เทียบเกณฑ์', html: compareCell,
+    sortVal: (r) => (r.value == null ? null : r.std_max ? r.value / r.std_max : r.std_min ? r.std_min / Math.max(r.value, 1e-9) : null) },
+  { key: 'sample_code', label: 'รหัสตัวอย่าง', code: true }, { key: 'depth', label: 'ความลึก' },
+  { key: 'project', label: 'โครงการ', clip: 2 }, { key: 'sampler', label: 'ผู้เก็บ' }, { key: 'lab', label: 'แล็บ' },
 ];
 function filteredResults() {
   const q = $('#rSearch').value.trim().toLowerCase();
@@ -797,18 +856,18 @@ function filteredResults() {
 }
 function renderResults() {
   const rows = filteredResults();
-  $('#cntResults').textContent = state.results.length;
+  $('#cntResults').textContent = state.results.length || '';
   const LIMIT = 3000;
-  $('#rCount').textContent = `${rows.length} รายการ` + (rows.length > LIMIT ? ` (แสดง ${LIMIT} แถวแรก — ใช้ตัวกรองเพื่อจำกัดผล หรือส่งออก CSV)` : '');
+  $('#rCount').textContent = `${rows.length.toLocaleString('th-TH')} รายการ` + (rows.length > LIMIT ? ` · แสดง ${LIMIT} แถวแรก` : '');
   const { key, desc } = state.resultSort;
   const head = RESULT_COLS.map((c) => `<th data-key="${c.key}" class="${c.key === key ? 'sorted' + (desc ? ' desc' : '') : ''}">${c.label}</th>`).join('');
   const body = rows.slice(0, LIMIT).map((r) => `<tr data-site="${r.site_id}" class="${r.exceed === 1 ? 'exceed' : ''}">` + RESULT_COLS.map((c) => {
     if (c.html) return `<td>${c.html(r)}</td>`;
     const v = c.show ? c.show(r) : c.fmt ? c.fmt(r[c.key]) : r[c.key];
-    return `<td class="${c.num ? 'num val' : ''}" title="${esc(v)}">${esc(v)}</td>`;
+    return `<td class="${c.num ? 'num' + (c.key === 'value' ? ' val' : ' std-text') : c.code ? 'code' : c.clip ? 'clip' + c.clip : ''}" title="${esc(v)}">${esc(v)}</td>`;
   }).join('') + '</tr>').join('');
   $('#resultsTable').innerHTML = `<thead><tr>${head}</tr></thead><tbody>${body ||
-    `<tr><td colspan="${RESULT_COLS.length}" class="muted">ไม่มีข้อมูล</td></tr>`}</tbody>`;
+    `<tr><td colspan="${RESULT_COLS.length}" class="empty">${state.results.length ? 'ไม่มีผลที่ตรงกับตัวกรอง' : 'ยังไม่มีผลวิเคราะห์ เปิดจุดบนแผนที่แล้วกด “เพิ่มตัวอย่าง”'}</td></tr>`}</tbody>`;
 }
 $('#resultsTable').addEventListener('click', (e) => {
   const th = e.target.closest('th[data-key]');
@@ -872,9 +931,9 @@ function renderHistoryEntry(h) {
   const ownLink = h.entity === 'site' && site ? `<span class="link" data-site="${site.id}">${esc(label)}</span>` : esc(label);
   const diff = diffRows(h.before, h.after);
   return `<div class="hist ${h.action}">
-    <div class="h"><b>${ACTION_LABELS[h.action] || h.action}${ENTITY_LABELS[h.entity] || h.entity}</b> ${ownLink}${siteLink}
-      <span class="who">· ${esc(h.user || '')} · ${esc(fmtDateTime(h.at))}</span>
-      ${h.before ? `<button class="btn small" data-restore="${h.id}" title="คืนข้อมูลเป็นสถานะก่อนการเปลี่ยนแปลงนี้">↶ ย้อนกลับ</button>` : ''}</div>
+    <div class="h"><span class="act">${ACTION_LABELS[h.action] || h.action}${ENTITY_LABELS[h.entity] || h.entity}</span> ${ownLink}${siteLink}
+      ${h.before ? `<button class="btn small" data-restore="${h.id}" title="คืนข้อมูลเป็นสถานะก่อนการเปลี่ยนแปลงนี้">${ic('undo')}ย้อนกลับ</button>` : ''}</div>
+    <div class="who">${esc(h.user || '')} · ${esc(fmtDateTime(h.at))}</div>
     ${diff ? `<table>${diff}</table>` : ''}</div>`;
 }
 async function renderHistoryTab() {
@@ -882,7 +941,7 @@ async function renderHistoryTab() {
   if ($('#hEntity').value) params.entity = $('#hEntity').value;
   const list = await guard(() => api('GET', '/api/history?' + new URLSearchParams(params)));
   if (!list) return;
-  $('#historyList').innerHTML = list.length ? list.map(renderHistoryEntry).join('') : '<div class="muted">ยังไม่มีประวัติ</div>';
+  $('#historyList').innerHTML = list.length ? list.map(renderHistoryEntry).join('') : '<div class="empty-box">ยังไม่มีประวัติ</div>';
 }
 $('#hEntity').addEventListener('change', renderHistoryTab);
 $('#hReload').onclick = renderHistoryTab;
@@ -918,7 +977,7 @@ function renderStandards() {
     <td><input name="unit" value="${esc(s.unit || '')}"></td>
     <td><input name="reference" value="${esc(s.reference || '')}"></td>
     <td style="white-space:nowrap"><button class="btn small" data-std-save>บันทึก</button>
-      ${s.id ? '<button class="btn small danger" data-std-del>✕</button>' : ''}</td></tr>`;
+      ${s.id ? `<button class="icon-btn" data-std-del title="ลบ" aria-label="ลบค่ามาตรฐาน">${ic('trash')}</button>` : ''}</td></tr>`;
   $('#stdTable').innerHTML = `<thead><tr><th>ประเภทตัวอย่าง</th><th>พารามิเตอร์</th><th>ต่ำสุด</th><th>สูงสุด</th><th>หน่วย</th><th>อ้างอิงประกาศ</th><th></th></tr></thead>
     <tbody>${state.standards.map(row).join('')}</tbody>`;
   $('#stdAdd').onclick = () => { $('#stdTable tbody').insertAdjacentHTML('beforeend', row({})); $('#stdTable tbody tr:last-child [name=parameter]').focus(); };
@@ -942,8 +1001,18 @@ $('#stdTable').addEventListener('click', (e) => {
 });
 
 // ------------------------------------------------------------------ tabs ---
+function moveSlider(instant = false) {
+  const b = $('.tabs button.active'), sl = $('.tab-slider');
+  if (!b) return;
+  sl.classList.toggle('instant', instant);
+  sl.style.width = b.offsetWidth - 16 + 'px';
+  sl.style.transform = `translateX(${b.offsetLeft + 8}px)`;
+}
+window.addEventListener('resize', () => moveSlider(true));
+if (document.fonts) document.fonts.ready.then(() => moveSlider(true));
 $$('.tabs button').forEach((b) => b.addEventListener('click', () => {
   $$('.tabs button').forEach((x) => x.classList.toggle('active', x === b));
+  moveSlider();
   $$('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + b.dataset.tab));
   $('#sidebar').classList.toggle('wide', ['results', 'history', 'standards'].includes(b.dataset.tab));
   store.set('tab', b.dataset.tab);
@@ -957,7 +1026,7 @@ $('#btnImportCsv').onclick = () => {
   if (!needUser()) return;
   openModal(`<h2>นำเข้าผลวิเคราะห์จาก CSV</h2>
     <p>บันทึกไฟล์จาก Excel เป็น <b>CSV UTF-8</b> โดยมีหัวคอลัมน์ (แถวแรก) ตามนี้ — 1 แถว = 1 พารามิเตอร์:</p>
-    <pre style="overflow:auto;background:var(--hover);padding:8px;border-radius:6px">site_code,site_name,lat,lng,project,sample_code,sample_date,media,depth,sampler,lab,parameter,value,unit
+    <pre>site_code,site_name,lat,lng,project,sample_code,sample_date,media,depth,sampler,lab,parameter,value,unit
 SW-01,คลองท้ายโรงงาน,13.7301,101.5231,โครงการ A,SW-01-1,2026-05-27,surface_water,,สมชาย,แล็บ X,Pb,0.012,mg/L
 SW-01,คลองท้ายโรงงาน,13.7301,101.5231,โครงการ A,SW-01-1,2026-05-27,surface_water,,สมชาย,แล็บ X,pH,7.2,</pre>
     <ul class="small">
@@ -966,7 +1035,7 @@ SW-01,คลองท้ายโรงงาน,13.7301,101.5231,โครง�
       <li>media ใช้ได้: ${Object.entries(state.meta.media).map(([k, v]) => `<code>${k}</code> (${esc(v)})`).join(', ')} — หรือพิมพ์ชื่อไทยก็ได้</li>
       <li>ค่าที่ต่ำกว่าขีดจำกัดการตรวจวัด ใส่เป็น <code>&lt;0.01</code> หรือ <code>ND</code> ได้</li>
     </ul>
-    <div class="form-actions"><button class="btn" id="csvCancel">ยกเลิก</button><button class="btn primary" id="csvPick">เลือกไฟล์ CSV…</button></div>`);
+    <div class="form-actions"><button class="btn" id="csvCancel">ยกเลิก</button><button class="btn primary" id="csvPick">${ic('upload')}เลือกไฟล์ CSV</button></div>`);
   $('#csvCancel').onclick = closeModal;
   $('#csvPick').onclick = () => { closeModal(); $('#fileCsv').click(); };
 };
@@ -990,10 +1059,16 @@ $('#fileCsv').onchange = (e) => uploadFile(e.target, '/api/import/csv',
 // ------------------------------------------------------------------ boot ---
 $('#userName').value = store.get('user', '');
 $('#userName').addEventListener('input', (e) => { store.set('user', e.target.value.trim()); e.target.classList.remove('need'); });
-document.addEventListener('click', (e) => {  // ปิดเมนูส่งออกเมื่อคลิกที่อื่น
-  const m = $('.menu');
-  if (m.open && !m.contains(e.target)) m.open = false;
+document.addEventListener('click', (e) => {  // ปิดเมนูเมื่อคลิกที่อื่น หรือเลือกรายการแล้ว
+  $$('.menu').forEach((m) => {
+    if (m.open && (!m.contains(e.target) || e.target.closest('.menu-items'))) m.open = false;
+  });
 });
+$$('.menu').forEach((m) => m.addEventListener('toggle', () => {
+  if (m.open) $$('.menu').forEach((o) => { if (o !== m) o.open = false; });
+}));
+hydrateIcons();
+moveSlider(true);
 (async () => {
   await guard(reloadAll);
   if (state.sites.length) fitAll();
