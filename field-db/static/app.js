@@ -15,6 +15,7 @@ const state = {
   selectedId: null, detail: null,
   mode: null, drawPts: [], drawTarget: null,
   selectMode: false, picked: new Set(),
+  hidden: new Set(),   // จุดที่ผู้ใช้ซ่อนบนแผนที่ (จำไว้ในเบราว์เซอร์นี้เท่านั้น)
   resultSort: { key: 'sample_date', desc: true },
 };
 
@@ -125,13 +126,22 @@ function renderMap() {
   const list = filteredSites();
   const step = Math.min(40, 600 / Math.max(list.length, 1));
   for (const s of list) {
+    if (state.hidden.has(s.id) && s.id !== state.selectedId) continue;
+    if (state.mode === 'edit' && state.drawTarget === s.id) continue;   // กำลังแก้รูปร่าง: แสดงเฉพาะตัวที่แก้
     const st = siteStatus(s);
     const g = parseGeom(s.geometry);
     if (g) {
-      L.geoJSON(g, {
-        style: { color: st === 'exceed' ? '#ff5a45' : '#f6f3e8', weight: 2, dashArray: st === 'exceed' ? null : '6 4', fillColor: st === 'exceed' ? '#ff5a45' : '#ffffff', fillOpacity: 0.12 },
-        pointToLayer: (f, ll) => L.circleMarker(ll, { radius: 4 }),
-      }).on('click', () => siteClick(s.id)).addTo(siteLayer);
+      const isLine = g.type === 'LineString';
+      const color = st === 'exceed' ? '#ff5a45' : isLine ? '#ffd54a' : '#f6f3e8';
+      const lyr = geomLayer(g, { color, weight: isLine ? 3 : 2, dashArray: st === 'exceed' || isLine ? null : '6 4',
+        fillColor: st === 'exceed' ? '#ff5a45' : '#ffffff', fillOpacity: 0.12 });
+      lyr.bindTooltip(`${esc(s.code || s.name)} · ${esc(measureGeom(g))}`, { sticky: true, className: 'measure-hover' });
+      lyr.on('click', () => siteClick(s.id)).addTo(siteLayer);
+      if (isLine) {   // เส้นวัดระยะ: ป้ายความยาวติดถาวรกลางเส้น เหมือน Google Earth
+        const pts = g.coordinates.map(toLL);
+        L.tooltip({ permanent: true, direction: 'center', className: 'gl measure-tip', interactive: false })
+          .setLatLng(lineMid(pts)).setContent(fmtDist(pathLen(pts))).addTo(siteLayer);
+      }
     }
     if (s.lat == null || s.lng == null) continue;
     const icon = L.divIcon({
@@ -165,40 +175,220 @@ map.on('mousemove', (e) => {
     `${lat.toFixed(6)}, ${lng.toFixed(6)}   |   UTM ${u.zone}${u.south ? 'S' : 'N'}  E ${u.E.toFixed(0)}  N ${u.N.toFixed(0)}`;
 });
 
-// ---------------------------------------------- map modes (add / draw / move) ---
-function setMode(mode, target = null) {
-  state.mode = mode; state.drawPts = []; state.drawTarget = target;
-  drawLayer.clearLayers();
-  const bar = $('#modeBar');
-  $('.map-wrap').classList.toggle('crosshair', !!mode);
-  $('#btnAddPoint').classList.toggle('active', mode === 'add-point');
-  $('#btnAddArea').classList.toggle('active', mode === 'draw' && !target);
-  if (!mode) { bar.hidden = true; return; }
-  bar.hidden = false;
-  const drawing = mode === 'draw';
-  $('#modeFinish').hidden = !drawing;
-  $('#modeUndo').hidden = !drawing;
-  updateModeText();
+// ------------------------------------------------------------- การวัด ---
+const R_EARTH = 6371008.8;
+const toRad = (d) => (d * Math.PI) / 180;
+function distM(a, b) {  // a, b = [lat, lng]
+  const dLat = toRad(b[0] - a[0]), dLng = toRad(b[1] - a[1]);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(a[0])) * Math.cos(toRad(b[0])) * Math.sin(dLng / 2) ** 2;
+  return 2 * R_EARTH * Math.asin(Math.min(1, Math.sqrt(h)));
 }
-function updateModeText() {
-  const t = {
+const pathLen = (pts) => pts.reduce((s, p, i) => (i ? s + distM(pts[i - 1], p) : 0), 0);
+function ringArea(pts) {  // พื้นที่บนทรงกลม (ตร.ม.) ของรูปปิดจาก [lat, lng]
+  if (pts.length < 3) return 0;
+  let s = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const [la1, ln1] = pts[i], [la2, ln2] = pts[(i + 1) % pts.length];
+    s += toRad(ln2 - ln1) * (2 + Math.sin(toRad(la1)) + Math.sin(toRad(la2)));
+  }
+  return Math.abs((s * R_EARTH * R_EARTH) / 2);
+}
+const fmtDist = (m) => (m < 1000 ? `${m < 10 ? m.toFixed(1) : Math.round(m).toLocaleString('th-TH')} ม.`
+  : `${(m / 1000).toLocaleString('th-TH', { maximumFractionDigits: m < 10000 ? 2 : 1 })} กม.`);
+function fmtArea(m2) {
+  const main = m2 < 1e6 ? `${Math.round(m2).toLocaleString('th-TH')} ตร.ม.` : `${(m2 / 1e6).toLocaleString('th-TH', { maximumFractionDigits: 2 })} ตร.กม.`;
+  const rai = m2 / 1600;  // 1 ไร่ = 1,600 ตร.ม.
+  return `${main} (${rai.toLocaleString('th-TH', { maximumFractionDigits: rai < 10 ? 2 : 1 })} ไร่)`;
+}
+function destPoint([lat, lng], m, bearingDeg) {
+  const d = m / R_EARTH, b = toRad(bearingDeg), p1 = toRad(lat), l1 = toRad(lng);
+  const p2 = Math.asin(Math.sin(p1) * Math.cos(d) + Math.cos(p1) * Math.sin(d) * Math.cos(b));
+  const l2 = l1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(p1), Math.cos(d) - Math.sin(p1) * Math.sin(p2));
+  return [(p2 * 180) / Math.PI, (l2 * 180) / Math.PI];
+}
+// GeoJSON [lng, lat] <-> Leaflet [lat, lng]
+const toLL = (c) => [c[1], c[0]];
+const toXY = (p) => [+p[1].toFixed(7), +p[0].toFixed(7)];
+function measureGeom(g) {
+  if (!g) return '';
+  if (g.type === 'LineString') return `ยาว ${fmtDist(pathLen(g.coordinates.map(toLL)))}`;
+  if (g.type === 'Polygon') {
+    const ring = g.coordinates[0].map(toLL).slice(0, -1);
+    return `พื้นที่ ${fmtArea(ringArea(ring))} · เส้นรอบรูป ${fmtDist(pathLen([...ring, ring[0]]))}`;
+  }
+  if (g.type === 'Circle') return `รัศมี ${fmtDist(g.radius)} · พื้นที่ ${fmtArea(Math.PI * g.radius ** 2)}`;
+  if (g.type === 'GeometryCollection') return g.geometries.map(measureGeom).filter(Boolean).join(' / ');
+  return '';
+}
+function geomLayer(g, style) {
+  if (g.type === 'Circle') return L.circle(toLL(g.center), { radius: g.radius, ...style });
+  if (g.type === 'GeometryCollection') return L.featureGroup(g.geometries.map((x) => geomLayer(x, style)));
+  return L.geoJSON(g, { style, pointToLayer: (f, ll) => L.circleMarker(ll, { radius: 4, ...style }) });
+}
+function geomBounds(g) {
+  if (g.type === 'Circle') return L.latLng(toLL(g.center)).toBounds(g.radius * 2);
+  if (g.type === 'GeometryCollection') {
+    const b = L.latLngBounds([]);
+    g.geometries.forEach((x) => b.extend(geomBounds(x)));
+    return b;
+  }
+  return L.geoJSON(g).getBounds();
+}
+function lineMid(pts) {  // จุดกึ่งกลางตามความยาวเส้น (ไว้วางป้ายระยะ)
+  const half = pathLen(pts) / 2;
+  let acc = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const d = distM(pts[i - 1], pts[i]);
+    if (acc + d >= half) { const f = (half - acc) / (d || 1); return [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * f, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * f]; }
+    acc += d;
+  }
+  return pts[0];
+}
+
+// ---------------------------------------- โหมดบนแผนที่: เพิ่ม/ย้าย/วาด/วงกลม/วัด/แก้รูปร่าง ---
+const DRAW_LABEL = { polygon: 'พื้นที่', line: 'เส้น', circle: 'วงกลม' };
+const PREVIEW = { color: '#00e5ff', weight: 2.5, dashArray: '6 4', interactive: false };
+// state.mode: 'add-point' | 'move' | 'draw' (state.drawKind = polygon/line) | 'circle' | 'measure' | 'edit'
+function setMode(mode, target = null, kind = null) {
+  state.mode = mode; state.drawPts = []; state.drawTarget = target; state.drawKind = kind;
+  state.hoverLL = null; state.circle = null; state.edit = null; state.measureClosed = false;
+  drawLayer.clearLayers();
+  $('.map-wrap').classList.toggle('crosshair', !!mode && mode !== 'edit');
+  $('#btnAddPoint').classList.toggle('active', mode === 'add-point');
+  $('#btnAddArea').classList.toggle('active', (mode === 'draw' || mode === 'circle') && !target);
+  $('#btnRuler').classList.toggle('active', mode === 'measure');
+  renderMap();   // ซ่อนรูปร่างเดิมระหว่างแก้ / แสดงกลับเมื่อเลิก
+  renderModeBar();
+}
+function startDraw(kind, target = null) {
+  if (!needUser()) return;
+  if (kind === 'circle') setMode('circle', target);
+  else setMode('draw', target, kind);
+}
+function currentMeasure() {
+  const pts = state.drawPts.concat(state.hoverLL && state.mode !== 'edit' ? [state.hoverLL] : []);
+  if (state.mode === 'draw' && state.drawKind === 'polygon') {
+    return pts.length >= 3 ? `พื้นที่ ${fmtArea(ringArea(pts))} · เส้นรอบรูป ${fmtDist(pathLen([...pts, pts[0]]))}`
+      : pts.length === 2 ? `ด้าน ${fmtDist(pathLen(pts))}` : '';
+  }
+  if (state.mode === 'draw') return pts.length >= 2 ? `ยาว ${fmtDist(pathLen(pts))}` : '';
+  if (state.mode === 'measure') {
+    if (!pts.length) return '';
+    let t = `ระยะรวม ${fmtDist(pathLen(pts))}`;
+    if (pts.length >= 2) t += ` · ช่วงล่าสุด ${fmtDist(distM(pts[pts.length - 2], pts[pts.length - 1]))}`;
+    if (state.measureClosed && pts.length >= 3) t = `พื้นที่ ${fmtArea(ringArea(pts))} · เส้นรอบรูป ${fmtDist(pathLen([...pts, pts[0]]))}`;
+    return t;
+  }
+  if (state.mode === 'circle' && state.circle) {
+    const r = state.circle.r ?? (state.hoverLL ? distM(state.circle.c, state.hoverLL) : 0);
+    return r ? `รัศมี ${fmtDist(r)} · พื้นที่ ${fmtArea(Math.PI * r * r)}` : '';
+  }
+  if (state.mode === 'edit' && state.edit) return measureGeom(editGeom());
+  return '';
+}
+function renderModeBar() {
+  const bar = $('#modeBar');
+  const m = state.mode;
+  if (!m) { bar.hidden = true; bar.innerHTML = ''; return; }
+  const n = state.drawPts.length;
+  const hint = {
     'add-point': 'คลิกบนแผนที่ตรงตำแหน่งที่ต้องการเพิ่มจุด',
     move: 'คลิกบนแผนที่ตรงตำแหน่งใหม่ของจุดนี้',
-    draw: `คลิกบนแผนที่ทีละมุมเพื่อวาดพื้นที่ (${state.drawPts.length} มุม) — ดับเบิลคลิกหรือกด “เสร็จ” เมื่อครบ`,
-  }[state.mode];
-  $('#modeText').textContent = t || '';
+    draw: state.drawKind === 'line' ? `วาดเส้น: คลิกทีละจุด (${n} จุด) ดับเบิลคลิกหรือกด “เสร็จ” เมื่อครบ`
+      : `วาดพื้นที่: คลิกทีละมุม (${n} มุม) ดับเบิลคลิกหรือกด “เสร็จ” เมื่อครบ`,
+    circle: state.circle ? 'คลิกเพื่อกำหนดรัศมี หรือพิมพ์รัศมีแล้วกด Enter' : 'คลิกตรงจุดศูนย์กลางของวงกลม',
+    measure: 'วัดระยะ: คลิกทีละจุดบนแผนที่ (ไม่บันทึก)',
+    edit: 'ลากจุดเพื่อย้าย · คลิกจุดเล็กกลางเส้นเพื่อเพิ่มมุม · ดับเบิลคลิกจุดเพื่อลบ',
+  }[m];
+  const meas = currentMeasure();
+  let btns = '';
+  if (m === 'draw') btns = `<button class="btn small light" data-mb="finish" ${n < (state.drawKind === 'line' ? 2 : 3) ? 'disabled' : ''}>${ic('check')}เสร็จ</button>
+    <button class="btn small on-glass" data-mb="undo" ${n ? '' : 'disabled'}>${ic('undo')}ลบจุดล่าสุด</button>`;
+  if (m === 'circle' && state.circle) btns = `<label class="mb-radius">รัศมี <input id="mbRadius" inputmode="decimal" placeholder="ม." size="7"> ม.</label>
+    <button class="btn small light" data-mb="finish">${ic('check')}เสร็จ</button>`;
+  if (m === 'measure') btns = `<label class="mb-check"><input type="checkbox" data-mb="close" ${state.measureClosed ? 'checked' : ''}> ปิดรูป (วัดพื้นที่)</label>
+    <button class="btn small on-glass" data-mb="undo" ${n ? '' : 'disabled'}>${ic('undo')}ลบจุดล่าสุด</button>
+    <button class="btn small on-glass" data-mb="clear" ${n ? '' : 'disabled'}>ล้าง</button>
+    <button class="btn small light" data-mb="save" ${n >= (state.measureClosed ? 3 : 2) ? '' : 'disabled'}>${ic('plus')}บันทึกเป็น${state.measureClosed ? 'พื้นที่' : 'เส้น'}</button>`;
+  if (m === 'edit') btns = `<button class="btn small light" data-mb="save-edit">${ic('check')}บันทึกรูปร่าง</button>`;
+  const keepRadius = $('#mbRadius') && document.activeElement === $('#mbRadius') ? $('#mbRadius').value : null;
+  bar.innerHTML = `<div class="mb-text"><span>${esc(hint)}</span>${meas ? `<b class="mb-meas">${esc(meas)}</b>` : ''}</div>
+    <div class="mb-btns">${btns}<button class="btn small on-glass" data-mb="cancel">${ic('x')}${m === 'measure' ? 'ปิด' : 'ยกเลิก'}</button></div>`;
+  bar.hidden = false;
+  if (keepRadius !== null) { const r = $('#mbRadius'); r.value = keepRadius; r.focus(); }
 }
+// อัปเดตเฉพาะตัวเลขระหว่างขยับเมาส์ (ไม่สร้างแถบใหม่ทั้งแถบ)
+function updateMeasureText() {
+  const el = $('#modeBar .mb-meas'), t = currentMeasure();
+  if (el) el.textContent = t; else if (t) renderModeBar();
+}
+$('#modeBar').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-mb]');
+  if (!b || b.disabled) return;
+  const a = b.dataset.mb;
+  if (a === 'cancel') setMode(null);
+  else if (a === 'finish') state.mode === 'circle' ? finishCircle() : finishDraw();
+  else if (a === 'undo') { state.drawPts.pop(); redrawPreview(); renderModeBar(); }
+  else if (a === 'clear') { state.drawPts = []; redrawPreview(); renderModeBar(); }
+  else if (a === 'save') saveMeasureAsSite();
+  else if (a === 'save-edit') saveEdit();
+});
+$('#modeBar').addEventListener('change', (e) => {
+  if (e.target.dataset.mb === 'close') { state.measureClosed = e.target.checked; redrawPreview(); renderModeBar(); }
+});
+$('#modeBar').addEventListener('keydown', (e) => {
+  if (e.target.id === 'mbRadius' && e.key === 'Enter') { e.preventDefault(); finishCircle(); }
+});
+$('#modeBar').addEventListener('input', (e) => {
+  if (e.target.id !== 'mbRadius' || !state.circle) return;
+  const r = parseFloat(e.target.value.replace(/,/g, ''));
+  state.circle.r = r > 0 ? r : null;
+  redrawPreview(); updateMeasureText();
+});
+
 function redrawPreview() {
   drawLayer.clearLayers();
-  if (!state.drawPts.length) return;
-  // interactive:false — ไม่งั้นเส้น/จุดที่วาดอยู่จะกินคลิกของแผนที่ ทำให้คลิกต่อในพื้นที่หรือดับเบิลคลิกจบไม่ได้
-  const style = { color: '#00e5ff', weight: 2.5, dashArray: '6 4', interactive: false };
-  if (state.drawPts.length >= 3) L.polygon(state.drawPts, { ...style, fillOpacity: 0.15 }).addTo(drawLayer);
-  else L.polyline(state.drawPts, style).addTo(drawLayer);
-  state.drawPts.forEach((p) => L.circleMarker(p, { radius: 4, color: '#00e5ff', fillOpacity: 1, interactive: false }).addTo(drawLayer));
+  // interactive:false — ไม่งั้นเส้น/จุดที่วาดอยู่จะกินคลิกของแผนที่ ทำให้คลิกต่อหรือดับเบิลคลิกจบไม่ได้
+  if (state.mode === 'circle' && state.circle) {
+    const r = state.circle.r ?? (state.hoverLL ? distM(state.circle.c, state.hoverLL) : 0);
+    L.circleMarker(state.circle.c, { radius: 4, color: '#00e5ff', fillOpacity: 1, interactive: false }).addTo(drawLayer);
+    if (r) {
+      L.circle(state.circle.c, { ...PREVIEW, radius: r, fillOpacity: 0.12 }).addTo(drawLayer);
+      const edge = destPoint(state.circle.c, r, 90);
+      L.polyline([state.circle.c, edge], { ...PREVIEW, dashArray: null, weight: 1.5 }).addTo(drawLayer);
+      L.tooltip({ permanent: true, direction: 'top', className: 'gl measure-tip', interactive: false })
+        .setLatLng(lineMid([state.circle.c, edge])).setContent(fmtDist(r)).addTo(drawLayer);
+    }
+    return;
+  }
+  const pts = state.drawPts;
+  if (!pts.length) return;
+  const all = state.hoverLL ? pts.concat([state.hoverLL]) : pts;
+  const closed = (state.mode === 'draw' && state.drawKind === 'polygon') || (state.mode === 'measure' && state.measureClosed);
+  if (closed && all.length >= 3) L.polygon(all, { ...PREVIEW, fillOpacity: 0.15 }).addTo(drawLayer);
+  else L.polyline(all, PREVIEW).addTo(drawLayer);
+  pts.forEach((p) => L.circleMarker(p, { radius: 4, color: '#00e5ff', fillOpacity: 1, interactive: false }).addTo(drawLayer));
+  if (state.mode === 'measure' || state.drawKind === 'line') {   // ป้ายระยะสะสมที่แต่ละจุด เหมือนไม้บรรทัดใน Google Earth
+    let acc = 0;
+    all.forEach((p, i) => {
+      if (!i) return;
+      acc += distM(all[i - 1], p);
+      L.tooltip({ permanent: true, direction: 'right', offset: [8, 0], className: 'gl measure-tip', interactive: false })
+        .setLatLng(p).setContent(fmtDist(acc)).addTo(drawLayer);
+    });
+  }
 }
+map.on('mousemove', (e) => {
+  if (!['draw', 'measure', 'circle'].includes(state.mode)) return;
+  if (state.mode === 'circle' && (!state.circle || state.circle.r != null)) return;
+  if (state.mode !== 'circle' && !state.drawPts.length) return;
+  state.hoverLL = [e.latlng.lat, e.latlng.lng];
+  redrawPreview(); updateMeasureText();
+});
+map.on('mouseout', () => { if (state.hoverLL) { state.hoverLL = null; redrawPreview(); updateMeasureText(); } });
 map.on('click', (e) => {
-  const { lat, lng } = e.latlng;
+  const ll = [e.latlng.lat, e.latlng.lng];
+  const [lat, lng] = ll;
   if (state.mode === 'add-point') {
     setMode(null);
     openSiteForm({ lat, lng });
@@ -210,41 +400,153 @@ map.on('click', (e) => {
       toast('ย้ายตำแหน่งแล้ว');
       await reloadAll(); await selectSite(id, false);
     });
-  } else if (state.mode === 'draw') {
-    state.drawPts.push([lat, lng]);
-    redrawPreview(); updateModeText();
+  } else if (state.mode === 'draw' || state.mode === 'measure') {
+    state.drawPts.push(ll);
+    redrawPreview(); renderModeBar();
+  } else if (state.mode === 'circle') {
+    if (!state.circle) { state.circle = { c: ll, r: null }; state.hoverLL = null; renderModeBar(); setTimeout(() => $('#mbRadius')?.focus(), 0); }
+    else { state.circle.r = state.circle.r ?? distM(state.circle.c, ll); finishCircle(); }
+    redrawPreview();
   }
 });
 map.on('dblclick', (e) => {
   if (state.mode === 'draw') { L.DomEvent.stop(e); finishDraw(); }
 });
 map.doubleClickZoom.disable();
-map.on('dblclick', (e) => { if (state.mode !== 'draw') map.setZoomAround(e.latlng, map.getZoom() + 1); });
+map.on('dblclick', (e) => { if (!['draw', 'measure', 'circle', 'edit'].includes(state.mode)) map.setZoomAround(e.latlng, map.getZoom() + 1); });
 
-function finishDraw() {
-  // ดับเบิลคลิกจะนับเป็นคลิกเดี่ยวสองครั้งด้วย จึงตัดจุดซ้ำที่อยู่ติดกันออก
-  const pts = state.drawPts.filter((p, i, a) => i === 0 || p[0] !== a[i - 1][0] || p[1] !== a[i - 1][1]);
-  if (pts.length < 3) { toast('พื้นที่ต้องมีอย่างน้อย 3 มุม', true); return; }
-  const ring = pts.map(([la, ln]) => [ln, la]);
+// ดับเบิลคลิกจะนับเป็นคลิกเดี่ยวสองครั้งด้วย จึงตัดจุดซ้ำที่อยู่ติดกันออก
+const dedupe = (pts) => pts.filter((p, i, a) => i === 0 || p[0] !== a[i - 1][0] || p[1] !== a[i - 1][1]);
+function geomFromPts(pts, kind) {
+  if (kind === 'line') return { type: 'LineString', coordinates: pts.map(toXY) };
+  const ring = pts.map(toXY);
   ring.push(ring[0]);
-  const geometry = JSON.stringify({ type: 'Polygon', coordinates: [ring] });
-  const lat = pts.reduce((s, p) => s + p[0], 0) / pts.length;
-  const lng = pts.reduce((s, p) => s + p[1], 0) / pts.length;
+  return { type: 'Polygon', coordinates: [ring] };
+}
+function saveGeometry(geometry, anchor, nameHint) {
   const target = state.drawTarget;
   setMode(null);
   if (target) {
     guard(async () => {
-      await api('PUT', `/api/sites/${target}`, { geometry });
-      toast('บันทึกรูปร่างพื้นที่แล้ว');
+      await api('PUT', `/api/sites/${target}`, { geometry: JSON.stringify(geometry) });
+      toast(`บันทึกรูปร่างแล้ว · ${measureGeom(geometry)}`);
       await reloadAll(); await selectSite(target, false);
     });
   } else {
-    openSiteForm({ lat, lng, geometry });
+    openSiteForm({ lat: anchor[0], lng: anchor[1], geometry: JSON.stringify(geometry), name: nameHint || '' });
   }
 }
-$('#modeFinish').onclick = finishDraw;
-$('#modeUndo').onclick = () => { state.drawPts.pop(); redrawPreview(); updateModeText(); };
-$('#modeCancel').onclick = () => setMode(null);
+function finishDraw() {
+  const kind = state.drawKind;
+  const pts = dedupe(state.drawPts);
+  if (pts.length < (kind === 'line' ? 2 : 3)) { toast(kind === 'line' ? 'เส้นต้องมีอย่างน้อย 2 จุด' : 'พื้นที่ต้องมีอย่างน้อย 3 มุม', true); return; }
+  const anchor = kind === 'line' ? lineMid(pts) : [pts.reduce((s, p) => s + p[0], 0) / pts.length, pts.reduce((s, p) => s + p[1], 0) / pts.length];
+  saveGeometry(geomFromPts(pts, kind), anchor);
+}
+function finishCircle() {
+  const c = state.circle;
+  if (!c || !(c.r > 0)) { toast('ยังไม่ได้กำหนดรัศมี', true); return; }
+  const r = Math.round(c.r * 10) / 10;
+  saveGeometry({ type: 'Circle', center: toXY(c.c), radius: r }, c.c, `รัศมี ${fmtDist(r)}`);
+}
+function saveMeasureAsSite() {
+  if (!needUser()) return;
+  const pts = dedupe(state.drawPts);
+  const kind = state.measureClosed ? 'polygon' : 'line';
+  const g = geomFromPts(pts, kind);
+  saveGeometry(g, kind === 'line' ? lineMid(pts) : pts[0], kind === 'line' ? `เส้นวัดระยะ ${fmtDist(pathLen(pts))}` : '');
+}
+$('#btnRuler').onclick = () => setMode(state.mode === 'measure' ? null : 'measure');
+$('#drawMenu').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-draw]');
+  if (!b) return;
+  $('#drawMenu').open = false;
+  startDraw(b.dataset.draw);
+});
+
+// --- แก้รูปร่างเดิม: ลากจุดยอด, คลิกจุดกลางเส้นเพื่อเพิ่มมุม, ดับเบิลคลิกจุดยอดเพื่อลบ, วงกลมลากศูนย์กลาง/รัศมี
+function editableOf(g) {  // แปลงเป็นโครงสร้างที่แก้ได้ (เฉพาะรูปร่างแรกที่แก้ได้ของ GeometryCollection)
+  if (g.type === 'GeometryCollection') {
+    const i = g.geometries.findIndex((x) => ['LineString', 'Polygon', 'Circle'].includes(x.type));
+    return i < 0 ? null : { ...editableOf(g.geometries[i]), parent: g, index: i };
+  }
+  if (g.type === 'LineString') return { kind: 'line', pts: g.coordinates.map(toLL) };
+  if (g.type === 'Polygon') return { kind: 'polygon', pts: g.coordinates[0].map(toLL).slice(0, -1), holes: g.coordinates.slice(1) };
+  if (g.type === 'Circle') return { kind: 'circle', c: toLL(g.center), r: g.radius };
+  return null;
+}
+function editGeom() {
+  const ed = state.edit;
+  let g;
+  if (ed.kind === 'circle') g = { type: 'Circle', center: toXY(ed.c), radius: Math.round(ed.r * 10) / 10 };
+  else {
+    g = geomFromPts(ed.pts, ed.kind);
+    if (ed.holes && ed.holes.length) g.coordinates.push(...ed.holes);
+  }
+  if (ed.parent) { const p = JSON.parse(JSON.stringify(ed.parent)); p.geometries[ed.index] = g; return p; }
+  return g;
+}
+function startEdit(site) {
+  const g = parseGeom(site.geometry);
+  const ed = g && editableOf(g);
+  if (!ed) { toast('จุดนี้ยังไม่มีรูปร่างให้แก้ไข', true); return; }
+  if (!needUser()) return;
+  setMode('edit', site.id);
+  state.edit = ed;
+  focusOn(geomBounds(g), 18);
+  drawEditHandles();
+  renderModeBar();
+}
+const vtxIcon = (cls) => L.divIcon({ className: 'vtx-wrap', html: `<div class="vtx ${cls}"></div>`, iconSize: [16, 16], iconAnchor: [8, 8] });
+function drawEditHandles() {
+  drawLayer.clearLayers();
+  const ed = state.edit;
+  const shapeStyle = { ...PREVIEW, dashArray: null, interactive: false };
+  let shape;
+  if (ed.kind === 'circle') shape = L.circle(ed.c, { ...shapeStyle, radius: ed.r, fillOpacity: 0.12 });
+  else shape = ed.kind === 'polygon' ? L.polygon(ed.pts, { ...shapeStyle, fillOpacity: 0.12 }) : L.polyline(ed.pts, shapeStyle);
+  shape.addTo(drawLayer);
+  const refresh = () => {
+    if (ed.kind === 'circle') { shape.setLatLng(ed.c); shape.setRadius(ed.r); } else shape.setLatLngs(ed.pts);
+    updateMeasureText();
+  };
+  if (ed.kind === 'circle') {
+    const center = L.marker(ed.c, { draggable: true, icon: vtxIcon('center'), title: 'ลากเพื่อย้ายจุดศูนย์กลาง' }).addTo(drawLayer);
+    const edge = L.marker(destPoint(ed.c, ed.r, 90), { draggable: true, icon: vtxIcon(''), title: 'ลากเพื่อปรับรัศมี' }).addTo(drawLayer);
+    center.on('drag', (e) => { ed.c = [e.latlng.lat, e.latlng.lng]; edge.setLatLng(destPoint(ed.c, ed.r, 90)); refresh(); });
+    edge.on('drag', (e) => { ed.r = Math.max(1, distM(ed.c, [e.latlng.lat, e.latlng.lng])); refresh(); });
+    return;
+  }
+  const closed = ed.kind === 'polygon', min = closed ? 3 : 2;
+  ed.pts.forEach((p, i) => {
+    const mk = L.marker(p, { draggable: true, icon: vtxIcon(''), title: 'ลากเพื่อย้าย · ดับเบิลคลิกเพื่อลบจุดนี้' }).addTo(drawLayer);
+    mk.on('drag', (e) => { ed.pts[i] = [e.latlng.lat, e.latlng.lng]; refresh(); });
+    mk.on('dragend', drawEditHandles);   // จัดตำแหน่งจุดกลางเส้นใหม่
+    mk.on('dblclick', (e) => {
+      L.DomEvent.stop(e);
+      if (ed.pts.length <= min) { toast(closed ? 'พื้นที่ต้องมีอย่างน้อย 3 มุม' : 'เส้นต้องมีอย่างน้อย 2 จุด', true); return; }
+      ed.pts.splice(i, 1); drawEditHandles(); updateMeasureText();
+    });
+  });
+  const segs = closed ? ed.pts.length : ed.pts.length - 1;
+  for (let i = 0; i < segs; i++) {
+    const a = ed.pts[i], b = ed.pts[(i + 1) % ed.pts.length];
+    const mid = L.marker([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2], { icon: vtxIcon('mid'), title: 'คลิกเพื่อเพิ่มมุมตรงนี้' }).addTo(drawLayer);
+    mid.on('click', (e) => { L.DomEvent.stop(e); ed.pts.splice(i + 1, 0, [e.latlng.lat, e.latlng.lng]); drawEditHandles(); updateMeasureText(); });
+  }
+}
+function saveEdit() {
+  const site = state.sites.find((x) => x.id === state.drawTarget);
+  const g = editGeom();
+  const extra = state.edit.kind === 'circle' && !state.edit.parent ? { lat: state.edit.c[0], lng: state.edit.c[1] } : {};
+  const id = state.drawTarget;
+  setMode(null);
+  guard(async () => {
+    await api('PUT', `/api/sites/${id}`, { geometry: JSON.stringify(g), ...extra });
+    toast(`บันทึกรูปร่าง ${site ? site.code || site.name : ''} แล้ว · ${measureGeom(g)}`);
+    await reloadAll(); await selectSite(id, false);
+  });
+}
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (!$('#lightbox').hidden) { $('#lightbox').hidden = true; return; }
@@ -347,9 +649,11 @@ function renderSites() {
     const chips = s.media.length ? `<div class="chips">${s.media.map(chip).join('')}</div>` : '';
     const delay = ul.classList.contains('first') ? ` style="animation-delay:${Math.min(i * 30, 450)}ms"` : '';
     const pick = state.selectMode ? `<input type="checkbox" class="pick" tabindex="-1" aria-label="เลือก ${esc(s.code || s.name)}" ${state.picked.has(s.id) ? 'checked' : ''}>` : '';
-    return `<li data-id="${s.id}" class="${s.id === state.selectedId ? 'sel' : ''}${state.picked.has(s.id) ? ' picked' : ''}"${delay}>
+    const hid = state.hidden.has(s.id);
+    return `<li data-id="${s.id}" class="${s.id === state.selectedId ? 'sel' : ''}${state.picked.has(s.id) ? ' picked' : ''}${hid ? ' is-hidden' : ''}"${delay}>
+      <button class="eye icon-btn" data-eye="${s.id}" title="${hid ? 'แสดงบนแผนที่' : 'ซ่อนบนแผนที่'}" aria-label="${hid ? 'แสดง' : 'ซ่อน'} ${esc(s.code || s.name)} บนแผนที่" aria-pressed="${hid}">${ic(hid ? 'eyeoff' : 'eye')}</button>
       ${pick}<span class="dot ${st}" title="${{ exceed: 'เกินมาตรฐาน', ok: 'ผ่านเกณฑ์', nodata: 'ยังไม่มีผลที่เทียบเกณฑ์ได้' }[st]}"></span>
-      <div style="min-width:0"><div class="t">${s.code ? `<span class="code">${esc(s.code)}</span>` : ''}<span class="name">${esc(s.name)}</span>${s.geometry ? ic('area') : ''}</div>
+      <div style="min-width:0"><div class="t">${s.code ? `<span class="code">${esc(s.code)}</span>` : ''}<span class="name">${esc(s.name)}</span>${s.geometry ? ic(shapeIcon(parseGeom(s.geometry))) : ''}</div>
       <div class="s">${sub}</div>${exc}${chips}</div></li>`;
   }).join('') : `<li class="empty">${state.sites.length ? 'ไม่มีจุดที่ตรงกับคำค้นหรือตัวกรอง'
     : 'ยังไม่มีข้อมูล<br>กด “เพิ่มจุดบนแผนที่” หรือนำเข้าไฟล์ KML/KMZ จาก Google Earth'}</li>`;
@@ -372,6 +676,19 @@ function setSelectMode(on) {
   $('#btnSelect').classList.toggle('active', on);
   renderSites();
 }
+// ---- ซ่อน/แสดงทีละจุดบนแผนที่ (ค่าการแสดงผลของผู้ใช้แต่ละคน เก็บในเบราว์เซอร์ ไม่แก้ฐานข้อมูล)
+const shapeIcon = (g) => (!g ? 'area' : g.type === 'LineString' ? 'line' : g.type === 'Circle' ? 'circle' : 'area');
+try { JSON.parse(store.get('hidden', '[]')).forEach((id) => state.hidden.add(id)); } catch { /* ignore */ }
+function saveHidden() { store.set('hidden', JSON.stringify([...state.hidden])); }
+function toggleHidden(ids, force) {
+  const hide = force ?? !ids.every((id) => state.hidden.has(id));
+  ids.forEach((id) => (hide ? state.hidden.add(id) : state.hidden.delete(id)));
+  saveHidden(); renderSites();
+}
+$('#showAll').onclick = () => { state.hidden.clear(); saveHidden(); renderSites(); };
+$('#bulkHide').onclick = () => toggleHidden([...state.picked], true);
+$('#bulkShow').onclick = () => toggleHidden([...state.picked], false);
+
 function updateBulkBar() {
   const n = state.picked.size, shown = filteredSites();
   $('#bulkBar').hidden = !state.selectMode;
@@ -380,7 +697,10 @@ function updateBulkBar() {
   $('#bulkAll').textContent = notPicked ? `เลือกทั้งหมดที่แสดง (${shown.length})` : '';
   $('#bulkAll').hidden = !notPicked;
   $('#bulkClear').hidden = !n;
-  ['#bulkChart', '#bulkEdit', '#bulkDelete'].forEach((b) => { $(b).disabled = !n; });
+  ['#bulkChart', '#bulkEdit', '#bulkDelete', '#bulkHide', '#bulkShow'].forEach((b) => { $(b).disabled = !n; });
+  const nh = state.sites.filter((x) => state.hidden.has(x.id)).length;
+  $('#showAll').hidden = !nh;
+  $('#showAll').textContent = `ซ่อนอยู่ ${nh} จุด · แสดงทั้งหมด`;
 }
 $('#btnSelect').onclick = () => setSelectMode(!state.selectMode);
 $('#bulkDone').onclick = () => setSelectMode(false);
@@ -461,6 +781,8 @@ $('#bulkEdit').onclick = () => {
   };
 };
 $('#siteList').addEventListener('click', (e) => {
+  const eye = e.target.closest('[data-eye]');
+  if (eye) { e.stopPropagation(); toggleHidden([+eye.dataset.eye]); return; }
   const li = e.target.closest('li[data-id]');
   if (li) siteClick(+li.dataset.id);
 });
@@ -498,12 +820,18 @@ async function selectSite(id, fly = true) {
   renderDetail();
   if (fly) {
     const g = parseGeom(d.geometry);
-    if (g) map.fitBounds(L.geoJSON(g).getBounds(), { padding: [60, 60], maxZoom: 17 });
-    else if (d.lat != null) map.setView([d.lat, d.lng], Math.max(map.getZoom(), 15));
+    if (g) focusOn(geomBounds(g), 17);
+    else if (d.lat != null) focusOn(L.latLng(d.lat, d.lng).toBounds(400), Math.max(map.getZoom(), 15));
   }
+}
+// จัดให้สิ่งที่ดูอยู่ไปอยู่ในส่วนแผนที่ที่มองเห็นได้ ไม่จมใต้แผงรายละเอียดด้านขวา
+function focusOn(bounds, maxZoom) {
+  const right = !$('#detail').hidden && innerWidth > 860 ? $('#detail').offsetWidth + 40 : 40;
+  map.fitBounds(bounds, { paddingTopLeft: [60, 80], paddingBottomRight: [right, 60], maxZoom });
 }
 function closeDetail() {
   $('#detail').hidden = true; state.selectedId = null; state.detail = null; renderSites();
+  $('.map-wrap').classList.remove('has-detail');
 }
 
 function stdText(r) {
@@ -554,6 +882,7 @@ function renderDetail() {
   const el = $('#detail');
   const entering = el.hidden;
   el.hidden = false;
+  $('.map-wrap').classList.add('has-detail');
   el.classList.toggle('enter', entering);
   const u = d.lat != null ? UTM.toUTM(d.lat, d.lng) : null;
   const site = state.sites.find((x) => x.id === d.id) || { n_exceed: 0, n_samples: d.samples.length, exceed_params: [] };
@@ -565,10 +894,13 @@ function renderDetail() {
       ? `${ic('flask')}<div>มีผลวิเคราะห์ แต่ยังไม่มีค่ามาตรฐานให้เทียบ เพิ่มได้ในแท็บ “ค่ามาตรฐาน”</div>`
       : `${ic('flask')}<div>ยังไม่มีผลวิเคราะห์ เพิ่มตัวอย่างแรกได้ที่ด้านล่าง</div>`,
   }[st];
+  const geo = parseGeom(d.geometry);
+  const hidden = state.hidden.has(d.id);
   const kv = [
     ['โครงการ', d.project], ['จังหวัด', d.province], ['ที่ตั้ง', d.address],
     ['พิกัด', d.lat != null ? `${d.lat.toFixed(6)}, ${d.lng.toFixed(6)}` : 'ไม่ระบุ', true],
     ['UTM', u ? `${u.zone}${u.south ? 'S' : 'N'}  E ${u.E.toFixed(0)}  N ${u.N.toFixed(0)}` : '', true],
+    ['ขนาด', geo ? measureGeom(geo) : ''],
     ['รายละเอียด', d.description], ['แก้ไขล่าสุด', fmtDateTime(d.updated_at)],
   ].filter(([, v]) => v);
   const gmaps = d.lat != null ? `https://www.google.com/maps?q=${d.lat},${d.lng}` : null;
@@ -585,17 +917,39 @@ function renderDetail() {
       <header><div><div class="when">${chip(s.media)}<span class="date">${esc(fmtDate(s.sample_date) || 'ไม่ระบุวันที่')}</span></div>
         ${meta ? `<div class="meta">${esc(meta)}</div>` : ''}</div>
         <div style="display:flex;gap:2px;flex:none">
+          <label class="icon-btn" title="เพิ่มรูปของตัวอย่างครั้งนี้" aria-label="เพิ่มรูปของตัวอย่างครั้งนี้">${ic('image')}<input type="file" accept="image/*" multiple hidden data-act="upload" data-sample="${s.id}"></label>
           <button class="icon-btn" data-act="hist-sample" data-id="${s.id}" title="ประวัติการแก้ไขของตัวอย่างนี้" aria-label="ประวัติการแก้ไข">${ic('history')}</button>
           <button class="btn small" data-act="edit-sample" data-id="${s.id}">${ic('edit')}แก้ไข</button></div></header>
       ${s.notes ? `<div class="notes">${esc(s.notes)}</div>` : ''}
+      ${(() => {
+        const ph = d.photos.filter((p) => p.sample_id === s.id);
+        return ph.length ? `<div class="sample-photos">${ph.slice(0, 6).map((p) => `<img data-act="photo" data-idx="${d.photos.indexOf(p)}"
+          src="/api/photos/${p.id}/thumb" alt="${esc(p.caption || p.filename)}" loading="lazy">`).join('')}${ph.length > 6 ? `<span class="muted small">+${ph.length - 6}</span>` : ''}</div>` : '';
+      })()}
       ${rows ? `<table class="data"><thead><tr><th>พารามิเตอร์</th><th style="text-align:right">ค่า</th><th>หน่วย</th><th style="text-align:right">เกณฑ์</th><th>เทียบเกณฑ์</th></tr></thead><tbody>${rows}</tbody></table>`
         : '<div class="empty-res">ยังไม่มีผลวิเคราะห์</div>'}
     </div>`;
   }).join('');
 
-  const photos = d.photos.map((p, i) => `<figure data-act="photo" data-idx="${i}">
+  const fig = (p) => `<figure data-act="photo" data-idx="${d.photos.indexOf(p)}">
       <img loading="lazy" src="/api/photos/${p.id}/thumb" alt="${esc(p.caption || p.filename)}">
-      <figcaption>${esc(p.caption || fmtDate(p.taken_at) || p.filename || '')}</figcaption></figure>`).join('');
+      <figcaption>${esc(p.caption || p.filename || '')}</figcaption></figure>`;
+  // จัดกลุ่มรูปตามวันที่ถ่าย (ใหม่ไปเก่า) จะได้แยกออกว่ารูปไหนมาจากการลงพื้นที่ครั้งไหน
+  const groups = new Map();
+  for (const p of d.photos) {
+    const k = (p.taken_at || '').slice(0, 10);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(p);
+  }
+  const keys = [...groups.keys()].sort((a, b) => (!a) - (!b) || b.localeCompare(a));
+  const photos = keys.map((k) => {
+    const list = groups.get(k);
+    const linked = [...new Set(list.map((p) => p.sample_id).filter(Boolean))]
+      .map((id) => d.samples.find((x) => x.id === id)).filter(Boolean);
+    return `<div class="photo-day"><div class="photo-day-h"><b>${k ? esc(fmtDate(k)) : 'ไม่ระบุวันที่'}</b>
+        <span class="muted">${list.length} รูป</span>${linked.map((x) => chip(x.media)).join('')}</div>
+      <div class="photos">${list.map(fig).join('')}</div></div>`;
+  }).join('');
 
   el.innerHTML = `
     <div class="detail-head">
@@ -605,7 +959,17 @@ function renderDetail() {
       <div class="detail-actions">
         <button class="btn small" data-act="edit">${ic('edit')}แก้ไขข้อมูล</button>
         <button class="btn small" data-act="move">${ic('move')}ย้ายหมุด</button>
-        <button class="btn small" data-act="draw">${ic('area')}${d.geometry ? 'วาดพื้นที่ใหม่' : 'วาดขอบเขต'}</button>
+        <details class="menu shape-menu">
+          <summary class="btn small">${ic(shapeIcon(geo))}รูปร่าง${ic('chevron')}</summary>
+          <div class="menu-items left">
+            ${geo ? `<button data-act="shape-edit"><b>แก้ไขรูปร่างเดิม</b><span>ลากจุด เพิ่ม/ลบมุม ปรับรัศมี</span></button>` : ''}
+            <button data-act="shape" data-kind="polygon"><b>${geo ? 'วาดใหม่เป็น' : 'วาด'}พื้นที่</b><span>รูปหลายเหลี่ยม</span></button>
+            <button data-act="shape" data-kind="line"><b>${geo ? 'วาดใหม่เป็น' : 'วาด'}เส้น</b><span>แนว / เส้นวัดระยะ</span></button>
+            <button data-act="shape" data-kind="circle"><b>${geo ? 'วาดใหม่เป็น' : 'วาด'}วงกลม</b><span>กำหนดรัศมีรอบจุด</span></button>
+            ${geo ? `<button data-act="shape-clear"><b>ลบรูปร่าง</b><span>เหลือแค่หมุด</span></button>` : ''}
+          </div>
+        </details>
+        <button class="btn small" data-act="toggle-hide" title="${hidden ? 'แสดงจุดนี้บนแผนที่' : 'ซ่อนจุดนี้บนแผนที่'}">${ic(hidden ? 'eye' : 'eyeoff')}${hidden ? 'แสดงบนแผนที่' : 'ซ่อน'}</button>
         ${gmaps ? `<a class="btn small" href="${gmaps}" target="_blank" rel="noopener">นำทาง${ic('external')}</a>` : ''}
         <button class="btn small danger" data-act="delete" style="margin-left:auto">${ic('trash')}ลบ</button>
       </div>
@@ -620,7 +984,7 @@ function renderDetail() {
 
       <div class="sec-h"><span>รูปถ่าย<span class="n">${d.photos.length}</span></span>
         <label class="btn small">${ic('upload')}เพิ่มรูป<input type="file" accept="image/*" multiple hidden data-act="upload"></label></div>
-      ${photos ? `<div class="photos">${photos}</div>` : '<div class="empty-box">ยังไม่มีรูป · ถ่ายจากมือถือแล้วอัปโหลดเข้าจุดนี้ได้เลย</div>'}
+      ${photos || '<div class="empty-box">ยังไม่มีรูป · ถ่ายจากมือถือแล้วอัปโหลดเข้าจุดนี้ได้เลย</div>'}
 
       <div class="sec-h"><span>ประวัติการแก้ไข</span>
         <button class="btn small" data-act="history">${ic('history')}แสดงประวัติ</button></div>
@@ -636,7 +1000,13 @@ $('#detail').addEventListener('click', (e) => {
   if (act === 'close') closeDetail();
   else if (act === 'edit') openSiteForm(d);
   else if (act === 'move') { if (needUser()) setMode('move', d.id); }
-  else if (act === 'draw') { if (needUser()) setMode('draw', d.id); }
+  else if (act === 'shape') { $('#detail .shape-menu').open = false; startDraw(t.dataset.kind, d.id); }
+  else if (act === 'shape-edit') { $('#detail .shape-menu').open = false; startEdit(d); }
+  else if (act === 'shape-clear') {
+    $('#detail .shape-menu').open = false;
+    if (!needUser() || !confirm('ลบรูปร่าง (พื้นที่/เส้น/วงกลม) ของจุดนี้? หมุดยังอยู่ และย้อนกลับได้จากประวัติ')) return;
+    guard(async () => { await api('PUT', `/api/sites/${d.id}`, { geometry: null }); toast('ลบรูปร่างแล้ว'); await reloadAll(); await selectSite(d.id, false); });
+  } else if (act === 'toggle-hide') { toggleHidden([d.id]); renderDetail(); }
   else if (act === 'delete') {
     if (!needUser()) return;
     if (!confirm(`ลบ "${d.name}" ?\n(ข้อมูลยังเก็บอยู่ในประวัติ กู้คืนได้จากแท็บ "ประวัติ")`)) return;
@@ -649,7 +1019,12 @@ $('#detail').addEventListener('click', (e) => {
   else if (act === 'chart') TrendChart.open({ param: t.dataset.param, media: t.dataset.media, siteIds: [d.id] });
 });
 $('#detail').addEventListener('change', (e) => {
-  if (e.target.dataset.act === 'upload') uploadPhotos([...e.target.files]);
+  if (e.target.dataset.act === 'upload') {
+    const files = [...e.target.files];
+    const sid = +e.target.dataset.sample || null;
+    e.target.value = '';
+    openPhotoDialog(files, sid);
+  }
 });
 
 async function loadDetailHistory(params) {
@@ -678,24 +1053,112 @@ function scaled(img, max, quality) {
   c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
   return c.toDataURL('image/jpeg', quality);
 }
-async function uploadPhotos(files) {
+// อ่านวันที่ถ่ายจากข้อมูล EXIF ของกล้อง/มือถือ (DateTimeOriginal) — คืนค่า 'YYYY-MM-DD' หรือ null
+async function exifDate(file) {
+  try {
+    if (!/jpe?g$/i.test(file.type) && !/\.jpe?g$/i.test(file.name)) return null;
+    const v = new DataView(await file.slice(0, 256 * 1024).arrayBuffer());
+    if (v.getUint16(0) !== 0xFFD8) return null;
+    let o = 2;
+    while (o + 4 < v.byteLength) {
+      const marker = v.getUint16(o), len = v.getUint16(o + 2);
+      if (marker === 0xFFE1 && v.getUint32(o + 4) === 0x45786966) {   // "Exif"
+        const t = o + 10, le = v.getUint16(t) === 0x4949;
+        const u16 = (x) => v.getUint16(t + x, le), u32 = (x) => v.getUint32(t + x, le);
+        const ascii = (x, n) => { let r = ''; for (let i = 0; i < n - 1; i++) r += String.fromCharCode(v.getUint8(t + x + i)); return r; };
+        const scan = (ifd) => {
+          const out = {};
+          const n = u16(ifd);
+          for (let i = 0; i < n; i++) {
+            const e = ifd + 2 + i * 12, tag = u16(e);
+            if (tag === 0x8769) out.exif = u32(e + 8);
+            if (tag === 0x9003 || tag === 0x0132) out[tag] = ascii(u32(e + 8), u32(e + 4));
+          }
+          return out;
+        };
+        const ifd0 = scan(u32(4));
+        const sub = ifd0.exif ? scan(ifd0.exif) : {};
+        const raw = sub[0x9003] || ifd0[0x0132];
+        const m = raw && /^(\d{4}):(\d{2}):(\d{2})/.exec(raw);
+        return m && m[1] !== '0000' ? `${m[1]}-${m[2]}-${m[3]}` : null;
+      }
+      if ((marker & 0xFF00) !== 0xFF00) return null;
+      o += 2 + len;
+    }
+  } catch { /* รูปที่ไม่มี EXIF หรืออ่านไม่ได้ */ }
+  return null;
+}
+const localDate = (ms) => { const d = new Date(ms); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
+
+async function openPhotoDialog(files, presetSampleId = null) {
   if (!files.length || !needUser()) return;
   const d = state.detail;
-  await guard(async () => {
-    let n = 0;
-    for (const f of files) {
-      toast(`กำลังอัปโหลดรูป ${++n}/${files.length}…`);
-      const img = await loadImage(f);
-      const taken = f.lastModified ? new Date(f.lastModified) : null;
-      await api('POST', '/api/photos', {
-        site_id: d.id, filename: f.name,
-        taken_at: taken ? taken.toISOString().slice(0, 10) : null,
-        data: scaled(img, 2000, 0.85), thumb: scaled(img, 360, 0.75),
-      });
-    }
-    toast(`เพิ่มรูปแล้ว ${files.length} รูป`);
-    await reloadAll(); await selectSite(d.id, false);
+  const preset = d.samples.find((x) => x.id === presetSampleId);
+  const items = await Promise.all(files.map(async (f) => {
+    const ex = await exifDate(f);
+    const date = preset?.sample_date || ex || (f.lastModified ? localDate(f.lastModified) : '');
+    return { f, url: URL.createObjectURL(f), date, src: preset ? 'sample' : ex ? 'exif' : 'file' };
+  }));
+  const sampleFor = (date) => d.samples.find((x) => x.sample_date === date && (!preset || x.media === preset.media))?.id
+    ?? d.samples.find((x) => x.sample_date === date)?.id ?? (date === preset?.sample_date ? preset.id : '');
+  const sampleOpts = (sel) => '<option value="">— ไม่ผูกกับตัวอย่าง —</option>' + d.samples.map((x) =>
+    `<option value="${x.id}" ${x.id === +sel ? 'selected' : ''}>${esc(mediaLabel(x.media))} · ${esc(fmtDate(x.sample_date))}${x.sample_code ? ' · ' + esc(x.sample_code) : ''}</option>`).join('');
+  const srcText = { exif: 'จากข้อมูลกล้อง', file: 'จากวันที่ไฟล์ · ตรวจวันที่', sample: 'ตามวันที่เก็บตัวอย่าง' };
+  openModal(`<h2>เพิ่มรูป ${items.length} รูป — ${esc(d.code || d.name)}</h2>
+    <div class="photo-bulk">
+      <label>ใช้วันที่นี้กับทุกรูป<input type="date" id="pdAllDate"></label>
+      <label>ผูกทุกรูปกับตัวอย่าง<select id="pdAllSample">${sampleOpts('')}</select></label>
+    </div>
+    <div class="photo-rows">${items.map((it, i) => `<div class="photo-row" data-i="${i}">
+      <img src="${it.url}" alt="">
+      <div class="photo-fields">
+        <div class="muted small photo-name">${esc(it.f.name)}</div>
+        <label>วันที่ถ่าย<input type="date" name="date" value="${esc(it.date)}" required>
+          <span class="src ${it.src}">${srcText[it.src]}</span></label>
+        <label>ตัวอย่างครั้งที่ถ่าย<select name="sample">${sampleOpts(sampleFor(it.date))}</select></label>
+        <label class="wide">คำบรรยาย<input name="caption" placeholder="เช่น สภาพจุดเก็บ, สีน้ำ, กองกาก"></label>
+      </div></div>`).join('')}</div>
+    <div class="form-actions"><button class="btn" id="pdCancel">ยกเลิก</button>
+      <button class="btn primary" id="pdSave">${ic('upload')}อัปโหลด ${items.length} รูป</button></div>`);
+  const rows = $$('.photo-row');
+  const cleanup = () => items.forEach((it) => URL.revokeObjectURL(it.url));
+  // เปลี่ยนวันที่ -> เลือกตัวอย่างวันเดียวกันให้อัตโนมัติ (ถ้ายังไม่ได้เลือกเอง)
+  rows.forEach((r) => {
+    const sel = $('[name=sample]', r);
+    $('[name=date]', r).addEventListener('change', (e) => {
+      $('.src', r).hidden = true;
+      if (!sel.dataset.touched) sel.value = sampleFor(e.target.value);
+    });
+    sel.addEventListener('change', () => { sel.dataset.touched = 1; });
   });
+  $('#pdAllDate').addEventListener('change', (e) => rows.forEach((r) => {
+    const inp = $('[name=date]', r); inp.value = e.target.value; inp.dispatchEvent(new Event('change'));
+  }));
+  $('#pdAllSample').addEventListener('change', (e) => rows.forEach((r) => {
+    const sel = $('[name=sample]', r); sel.value = e.target.value; sel.dataset.touched = 1;
+    const smp = d.samples.find((x) => x.id === +e.target.value);
+    if (smp?.sample_date) { $('[name=date]', r).value = smp.sample_date; $('.src', r).hidden = true; }
+  }));
+  $('#pdCancel').onclick = () => { cleanup(); closeModal(); };
+  $('#pdSave').onclick = () => {
+    const missing = rows.filter((r) => !$('[name=date]', r).value);
+    if (missing.length) { toast(`ยังไม่ได้ใส่วันที่ ${missing.length} รูป`, true); $('[name=date]', missing[0]).focus(); return; }
+    const meta = rows.map((r) => ({ date: $('[name=date]', r).value, sample: +$('[name=sample]', r).value || null, caption: $('[name=caption]', r).value }));
+    closeModal();
+    guard(async () => {
+      for (let i = 0; i < items.length; i++) {
+        toast(`กำลังอัปโหลดรูป ${i + 1}/${items.length}…`);
+        const img = await loadImage(items[i].f);
+        await api('POST', '/api/photos', {
+          site_id: d.id, filename: items[i].f.name, taken_at: meta[i].date, sample_id: meta[i].sample, caption: meta[i].caption,
+          data: scaled(img, 2000, 0.85), thumb: scaled(img, 360, 0.75),
+        });
+      }
+      cleanup();
+      toast(`เพิ่มรูปแล้ว ${items.length} รูป`);
+      await reloadAll(); await selectSite(d.id, false);
+    });
+  };
 }
 
 function openLightbox(idx) {

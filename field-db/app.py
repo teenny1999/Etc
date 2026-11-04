@@ -238,6 +238,13 @@ def site_values(data):
     if isinstance(g, (dict, list)):
         g = json.dumps(g)
     vals["geometry"] = clean_text(g)
+    if vals["geometry"]:
+        try:
+            gj = json.loads(vals["geometry"])
+            if gj.get("type") == "Circle" and not (float(gj["radius"]) > 0 and len(gj["center"]) == 2):
+                raise ValueError
+        except (ValueError, TypeError, KeyError, AttributeError):
+            raise ApiError(400, "รูปร่าง (geometry) ไม่ถูกต้อง")
     if not vals["name"]:
         raise ApiError(400, "ต้องระบุชื่อจุด/พื้นที่")
     if vals["lat"] is not None and not -90 <= vals["lat"] <= 90:
@@ -803,6 +810,20 @@ def import_csv(con, user, raw):
     return {"rows": len(rows), "new_sites": new_sites, "samples": len(groups), "results": n_results}
 
 
+def circle_ring(center, radius, n=72):
+    """จุดรอบวงกลมรัศมี radius เมตร รอบ center [lng, lat] บนทรงกลม"""
+    import math
+    lng0, lat0 = map(math.radians, center)
+    d = radius / 6371008.8
+    pts = []
+    for i in range(n + 1):
+        b = 2 * math.pi * i / n
+        lat = math.asin(math.sin(lat0) * math.cos(d) + math.cos(lat0) * math.sin(d) * math.cos(b))
+        lng = lng0 + math.atan2(math.sin(b) * math.sin(d) * math.cos(lat0), math.cos(d) - math.sin(lat0) * math.sin(lat))
+        pts.append([round(math.degrees(lng), 7), round(math.degrees(lat), 7)])
+    return pts
+
+
 def export_kml(con):
     sites = list_sites(con)
     res = {}
@@ -843,6 +864,8 @@ def export_kml(con):
             return s + "</Polygon>"
         if t == "GeometryCollection":
             return "<MultiGeometry>" + "".join(geom_kml(x) for x in g["geometries"]) + "</MultiGeometry>"
+        if t == "Circle":  # KML ไม่มีวงกลม ส่งออกเป็นรูปหลายเหลี่ยม 72 มุม
+            return geom_kml({"type": "Polygon", "coordinates": [circle_ring(g["center"], float(g["radius"]))]})
         return ""
 
     for proj, items in sorted(by_project.items()):
@@ -1017,10 +1040,17 @@ def r_photo_create(h, con):
     if not data:
         raise ApiError(400, "ไม่มีข้อมูลรูป")
     _, thumb = decode_data_url(d.get("thumb"))
+    sample_id = d.get("sample_id") or None
+    if sample_id is not None and not con.execute("SELECT 1 FROM samples WHERE id=? AND site_id=?",
+                                                 (sample_id, site_id)).fetchone():
+        raise ApiError(400, "ตัวอย่างที่ระบุไม่ได้อยู่ในจุดนี้")
+    taken = clean_text(d.get("taken_at"))
+    if taken and not re.match(r"^\d{4}-\d{2}-\d{2}", taken):
+        raise ApiError(400, "วันที่ถ่ายต้องอยู่ในรูปแบบ ปปปป-ดด-วว (ค.ศ.)")
     cur = con.execute("INSERT INTO photos(site_id,sample_id,caption,taken_at,filename,mime,data,thumb,created_at) "
                       "VALUES(?,?,?,?,?,?,?,?,?)",
-                      (site_id, d.get("sample_id") or None, clean_text(d.get("caption")),
-                       clean_text(d.get("taken_at")), clean_text(d.get("filename")), mime, data, thumb, now()))
+                      (site_id, sample_id, clean_text(d.get("caption")),
+                       taken, clean_text(d.get("filename")), mime, data, thumb, now()))
     pid = cur.lastrowid
     after = snap_photo(con, pid)
     log(con, h.user, "create", "photo", pid, site_id, None, after, after.get("caption") or after.get("filename"))

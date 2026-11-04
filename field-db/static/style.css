@@ -558,3 +558,64 @@ label.field > select, label.field > input { color: var(--ink); font-weight: 400;
   .bulk-on { margin-top: 8px; }
   .chart-head { flex-wrap: wrap; }
 }
+
+/* ------------------------------------------------ v4: ซ่อน/แสดง, วาดเส้น/วงกลม, วัดระยะ, แก้รูปร่าง ------------------------------------------------ */
+.menu-items.left { left: 0; right: auto; transform-origin: top left; }
+.add-row .menu > summary { height: 34px; }
+.site-list li { padding-right: 44px; }
+.site-list .eye { position: absolute; top: 6px; right: 6px; width: 32px; height: 32px; color: var(--faint); }
+.site-list .eye:hover { color: var(--ink); }
+.site-list li.is-hidden .eye { color: var(--ink-2); }
+.site-list li.is-hidden > :not(.eye) { opacity: .5; }
+
+.mode-bar { gap: 6px 12px; padding: 7px 7px 7px 14px; max-width: min(860px, calc(100% - 24px)); }
+.mb-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.mb-text span { font-size: 13px; opacity: .85; }
+.mb-meas { font: 600 14px var(--mono); color: #7ef0ff; }
+.mb-btns { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-left: auto; }
+.mb-radius, .mb-check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; }
+.mb-radius input { width: 84px; min-height: 28px; padding: 2px 8px; background: rgba(255, 255, 255, .1); border-color: rgba(255, 255, 255, .25); color: #fff; font-family: var(--mono); }
+.mb-check input { accent-color: #7ef0ff; }
+
+.vtx-wrap { background: none; border: 0; }
+.vtx { width: 14px; height: 14px; margin: 1px; border-radius: 50%; background: #fff; border: 2.5px solid #00b8d4; box-shadow: 0 1px 4px rgba(0, 0, 0, .6); cursor: grab; transition: transform .12s; }
+.vtx:hover { transform: scale(1.25); }
+.vtx.mid { width: 10px; height: 10px; margin: 3px; background: rgba(255, 255, 255, .55); border-width: 2px; cursor: copy; }
+.vtx.center { border-radius: 3px; background: #00b8d4; border-color: #fff; cursor: move; }
+.leaflet-dragging .vtx { cursor: grabbing; }
+
+.leaflet-tooltip.gl.measure-tip { font: 600 12.5px var(--mono); color: #fff7cc; }
+.leaflet-tooltip.measure-hover { font: 500 13px var(--sans); border-radius: 6px; border: 0; box-shadow: 0 2px 10px rgba(0, 0, 0, .3); }
+@media (max-width: 860px) {
+  .mode-bar { top: 8px; }
+  .mb-text span { font-size: 12.5px; }
+}
+/* แถบเครื่องมือวาด: อยู่เหนือแผงรายละเอียด และจัดกึ่งกลางในส่วนแผนที่ที่มองเห็น */
+.mode-bar { z-index: 1050; }
+.map-wrap.has-detail .mode-bar { left: calc((100% - 490px) / 2); max-width: calc(100% - 510px); }
+@media (max-width: 860px) { .map-wrap.has-detail .mode-bar { left: 50%; max-width: calc(100% - 24px); } }
+
+/* ------------------------------------------------ v4: วันที่ของรูป ------------------------------------------------ */
+.photo-day + .photo-day { margin-top: 14px; }
+.photo-day-h { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-bottom: 6px; font-size: 13.5px; }
+.sample-photos { display: flex; gap: 6px; align-items: center; padding: 0 12px 10px; flex-wrap: wrap; }
+.sample-photos img { width: 52px; height: 52px; object-fit: cover; border-radius: 6px; cursor: pointer; background: var(--hover); transition: transform .15s var(--ease-out); }
+.sample-photos img:hover { transform: translateY(-2px); }
+.photo-bulk { display: flex; flex-wrap: wrap; gap: 10px 14px; padding: 10px 12px; margin-bottom: 12px; background: var(--panel-2); border: 1px solid var(--line); border-radius: 10px; }
+.photo-bulk label, .photo-fields label { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; font-weight: 500; color: var(--muted); flex: 1 1 200px; }
+.photo-bulk input, .photo-bulk select, .photo-fields input, .photo-fields select { color: var(--ink); font-weight: 400; font-size: 14px; }
+.photo-rows { display: flex; flex-direction: column; gap: 10px; max-height: 58vh; overflow: auto; padding-right: 4px; }
+.photo-row { display: grid; grid-template-columns: 112px 1fr; gap: 12px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.photo-row:last-child { border-bottom: 0; }
+.photo-row img { width: 112px; height: 112px; object-fit: cover; border-radius: 8px; background: var(--hover); }
+.photo-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; align-content: start; }
+.photo-fields .wide, .photo-name { grid-column: 1 / -1; }
+.photo-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+.photo-fields .src { font-size: 12px; font-weight: 400; }
+.photo-fields .src.exif, .photo-fields .src.sample { color: var(--ok); }
+.photo-fields .src.file { color: var(--low); }
+@media (max-width: 600px) {
+  .photo-row { grid-template-columns: 76px 1fr; }
+  .photo-row img { width: 76px; height: 76px; }
+  .photo-fields { grid-template-columns: 1fr; }
+}

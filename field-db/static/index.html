@@ -58,7 +58,14 @@
     <section class="tab-panel active" id="tab-sites">
       <div class="add-row">
         <button class="btn primary grow" id="btnAddPoint" data-i="pin">เพิ่มจุดบนแผนที่</button>
-        <button class="btn" id="btnAddArea" data-i="area" title="คลิกทีละมุมเพื่อวาดพื้นที่">วาดพื้นที่</button>
+        <details class="menu" id="drawMenu">
+          <summary class="btn" id="btnAddArea" data-i="area">วาด</summary>
+          <div class="menu-items left">
+            <button data-draw="polygon"><b>พื้นที่ (รูปหลายเหลี่ยม)</b><span>คลิกทีละมุม ดับเบิลคลิกเพื่อจบ</span></button>
+            <button data-draw="line"><b>เส้น / แนว</b><span>เช่น แนวลำน้ำ แนวรั้ว เส้นวัดระยะ</span></button>
+            <button data-draw="circle"><b>วงกลม / รัศมี</b><span>คลิกจุดศูนย์กลาง แล้วคลิกหรือพิมพ์รัศมี</span></button>
+          </div>
+        </details>
         <button class="btn" id="btnAddManual" data-i="crosshair" title="พิมพ์พิกัดเอง (Lat/Long หรือ UTM)">พิกัด</button>
       </div>
       <label class="search-box" data-i="search">
@@ -82,7 +89,7 @@
         </select>
       </div>
       <div class="list-bar">
-        <span class="muted small" id="siteCount"></span>
+        <span class="muted small"><span id="siteCount"></span> <button class="link-btn" id="showAll" hidden></button></span>
         <button class="btn small" id="btnSelect" data-i="check">เลือกหลายจุด</button>
       </div>
       <ul class="site-list first" id="siteList"></ul>
@@ -91,6 +98,8 @@
           <button class="link-btn" id="bulkAll"></button>
           <button class="link-btn" id="bulkClear">ล้าง</button></div>
         <div class="bulk-actions">
+          <button class="btn small" id="bulkHide" data-i="eyeoff" title="ซ่อนจุดที่เลือกบนแผนที่">ซ่อน</button>
+          <button class="btn small" id="bulkShow" data-i="eye" title="แสดงจุดที่เลือกบนแผนที่">แสดง</button>
           <button class="btn small" id="bulkChart" data-i="chart">กราฟเทียบ</button>
           <button class="btn small" id="bulkEdit" data-i="edit">แก้ไขพร้อมกัน</button>
           <button class="btn small danger" id="bulkDelete" data-i="trash">ลบ</button>
@@ -181,18 +190,14 @@
         <option value="both">รหัส + ชื่อ</option>
       </select>
       <button class="btn small on-glass" id="btnFit" data-i="fit">ดูทุกจุด</button>
+      <button class="btn small on-glass" id="btnRuler" data-i="ruler" title="วัดระยะทางและพื้นที่ (ไม่บันทึก)">วัดระยะ</button>
     </div>
     <div class="legend glass" aria-label="สัญลักษณ์">
       <span><i class="dot exceed"></i>เกินมาตรฐาน</span>
       <span><i class="dot ok"></i>ผ่าน</span>
       <span><i class="dot nodata"></i>ยังไม่มีผลเทียบเกณฑ์</span>
     </div>
-    <div class="mode-bar glass" id="modeBar" hidden>
-      <span id="modeText"></span>
-      <button class="btn small light" id="modeFinish" data-i="check" hidden>เสร็จ</button>
-      <button class="btn small on-glass" id="modeUndo" data-i="undo" hidden>ลบมุมล่าสุด</button>
-      <button class="btn small on-glass" id="modeCancel" data-i="x">ยกเลิก</button>
-    </div>
+    <div class="mode-bar glass" id="modeBar" hidden></div>
     <div class="coord-readout glass" id="coordReadout"></div>
     <aside class="detail" id="detail" hidden></aside>
   </div>

@@ -178,6 +178,24 @@ class ApiTest(unittest.TestCase):
         _, sites = self.call("GET", "/api/sites")
         self.assertNotIn(sid, [x["id"] for x in sites])
 
+    def test_line_and_circle_geometry(self):
+        circle = {"type": "Circle", "center": [101.5, 13.7], "radius": 500}
+        st, r = self.call("POST", "/api/sites", {"name": "รัศมี 500 ม.", "lat": 13.7, "lng": 101.5, "geometry": circle})
+        self.assertEqual(st, 200)
+        line = {"type": "LineString", "coordinates": [[101.5, 13.7], [101.51, 13.71]]}
+        self.call("POST", "/api/sites", {"name": "เส้นวัด", "lat": 13.7, "lng": 101.5, "geometry": line})
+        st, _ = self.call("POST", "/api/sites", {"name": "เสีย", "geometry": {"type": "Circle", "center": [1, 2], "radius": -1}})
+        self.assertEqual(st, 400)
+        st, _ = self.call("POST", "/api/sites", {"name": "เสีย", "geometry": "{not json"})
+        self.assertEqual(st, 400)
+        _, kml = self.call("GET", "/api/export/kml")
+        self.assertIn("รัศมี 500 ม.".encode(), kml)
+        self.assertIn(b"<LineString>", kml)
+        ring = app.circle_ring([101.5, 13.7], 500)
+        import math
+        dlat = math.radians(ring[0][1] - 13.7) * 6371008.8           # จุดแรกอยู่ทิศเหนือ ห่างเท่ารัศมี
+        self.assertAlmostEqual(dlat, 500, delta=1)
+
     def test_validation(self):
         st, r = self.call("POST", "/api/sites", {"name": ""})
         self.assertEqual(st, 400)
@@ -196,6 +214,21 @@ class ApiTest(unittest.TestCase):
         self.call("DELETE", f"/api/photos/{p['id']}")
         _, d = self.call("GET", f"/api/sites/{r['id']}")
         self.assertEqual(d["photos"], [])
+
+    def test_photo_date_and_sample_must_belong_to_site(self):
+        png = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+        _, a = self.call("POST", "/api/sites", {"name": "A", "lat": 13, "lng": 100})
+        _, b = self.call("POST", "/api/sites", {"name": "B", "lat": 13, "lng": 100})
+        _, sa = self.call("POST", "/api/samples", {"site_id": a["id"], "media": "soil", "sample_date": "2026-05-27"})
+        _, sb = self.call("POST", "/api/samples", {"site_id": b["id"], "media": "soil"})
+        st, p = self.call("POST", "/api/photos", {"site_id": a["id"], "data": png, "taken_at": "2026-05-27", "sample_id": sa["id"]})
+        self.assertEqual(st, 200)
+        _, d = self.call("GET", f"/api/sites/{a['id']}")
+        self.assertEqual((d["photos"][0]["taken_at"], d["photos"][0]["sample_id"]), ("2026-05-27", sa["id"]))
+        st, _ = self.call("POST", "/api/photos", {"site_id": a["id"], "data": png, "sample_id": sb["id"]})
+        self.assertEqual(st, 400)                                   # ตัวอย่างของจุดอื่น
+        st, _ = self.call("POST", "/api/photos", {"site_id": a["id"], "data": png, "taken_at": "27/05/2569"})
+        self.assertEqual(st, 400)
 
     def test_kml_kmz_import_and_export(self):
         st, r = self.call("POST", "/api/import/kml", raw=KML.encode(), headers={"X-Filename": "a.kml"})
