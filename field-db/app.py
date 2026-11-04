@@ -1280,9 +1280,21 @@ def main():
                     help="ตำแหน่งไฟล์ฐานข้อมูล (ค่าเริ่มต้น data/fielddata.db)")
     ap.add_argument("--no-browser", action="store_true", help="ไม่ต้องเปิดเบราว์เซอร์อัตโนมัติ")
     a = ap.parse_args()
+    for stream in (sys.stdout, sys.stderr):  # คอนโซล Windows บางเครื่องพิมพ์ภาษาไทยไม่ได้ -> อย่าให้โปรแกรมล้ม
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
     DB_PATH = os.path.abspath(a.db)
-    srv = make_server(a.host, a.port)
     url = f"http://localhost:{a.port}/"
+    try:
+        srv = make_server(a.host, a.port)
+    except OSError:
+        # พอร์ตถูกใช้อยู่ ส่วนใหญ่คือเปิดโปรแกรมซ้ำ -> เปิดเบราว์เซอร์ไปที่ตัวที่รันอยู่แทน
+        print(f"พอร์ต {a.port} ถูกใช้งานอยู่ (โปรแกรมอาจเปิดอยู่แล้ว) กำลังเปิด {url}")
+        if not a.no_browser:
+            webbrowser.open(url)
+        return
     print("=" * 60)
     print(" ฐานข้อมูลจุดเก็บตัวอย่าง พร้อมใช้งานแล้ว")
     print(f" เปิดเบราว์เซอร์ไปที่: {url}")

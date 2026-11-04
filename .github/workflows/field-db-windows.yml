@@ -1,0 +1,76 @@
+name: field-db Windows portable
+
+on:
+  push:
+    paths:
+      - "field-db/**"
+      - ".github/workflows/field-db-windows.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build portable zip
+        run: python field-db/windows/build_portable.py --out dist
+
+      - name: Unit tests with the bundled Python
+        shell: pwsh
+        run: |
+          Expand-Archive dist/FieldDB-windows.zip -DestinationPath t
+          $env:PYTHONUTF8 = "1"
+          $env:FIELDDB_QUIET = "1"
+          # test_app.py imports the app copy inside the bundle (python312._pth includes ..\app)
+          Copy-Item field-db/test_app.py t/FieldDB/app/
+          t/FieldDB/python/python.exe t/FieldDB/app/test_app.py -v
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          Remove-Item t/FieldDB/app/test_app.py
+
+      - name: Smoke test the .bat launchers
+        shell: pwsh
+        run: |
+          $root = (Resolve-Path t/FieldDB).Path
+          function Wait-Up($url) {
+            for ($i = 0; $i -lt 40; $i++) {
+              try { return Invoke-WebRequest -UseBasicParsing $url -TimeoutSec 3 } catch { Start-Sleep -Milliseconds 500 }
+            }
+            throw "server did not start: $url"
+          }
+          # Start-FieldDB.bat, as a double-click would (cmd /c), without opening a browser
+          $p = Start-Process cmd -ArgumentList '/c', "`"$root\Start-FieldDB.bat`" --no-browser" -PassThru -WindowStyle Hidden
+          $r = Wait-Up "http://127.0.0.1:8765/"
+          if (-not $r.Content.Contains("leaflet")) { throw "index page missing" }
+          $meta = Invoke-RestMethod http://127.0.0.1:8765/api/meta
+          Write-Host "db_path = $($meta.db_path)"
+          if (-not (Test-Path "$root\app\data\fielddata.db")) { throw "database not created in app\data" }
+          $site = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8765/api/sites -ContentType 'application/json; charset=utf-8' `
+            -Body ([Text.Encoding]::UTF8.GetBytes('{"name":"ทดสอบ Windows","lat":13.7,"lng":101.5}'))
+          $sites = Invoke-RestMethod http://127.0.0.1:8765/api/sites
+          if ($sites.Count -ne 1) { throw "expected 1 site" }
+          # second launch while running must not crash (port busy -> just opens the browser)
+          $p2 = Start-Process cmd -ArgumentList '/c', "`"$root\Start-FieldDB.bat`" --no-browser" -PassThru -Wait -WindowStyle Hidden
+          if ($p2.ExitCode -ne 0) { throw "second launch failed: $($p2.ExitCode)" }
+
+          # Start-Demo-Data.bat: creates demo.db with sample data on port 8766
+          $d = Start-Process cmd -ArgumentList '/c', "`"$root\Start-Demo-Data.bat`" --no-browser" -PassThru -WindowStyle Hidden
+          Wait-Up "http://127.0.0.1:8766/api/meta" | Out-Null
+          $demo = Invoke-RestMethod http://127.0.0.1:8766/api/results
+          Write-Host "demo results: $($demo.Count)"
+          if ($demo.Count -lt 20) { throw "demo data missing" }
+          Get-Process python -ErrorAction SilentlyContinue | Stop-Process -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: FieldDB-windows
+          path: dist/FieldDB-windows.zip
+          retention-days: 30
