@@ -158,7 +158,11 @@ class ApiTest(unittest.TestCase):
         try:
             app.DB_PATH = path
             app.init_db()
-            cols = [r[1] for r in sqlite3.connect(path).execute("PRAGMA table_info(history)")]
+            c = sqlite3.connect(path)
+            try:  # ต้องปิดการเชื่อมต่อ ไม่งั้น Windows ล็อกไฟล์จนลบโฟลเดอร์ชั่วคราวไม่ได้
+                cols = [r[1] for r in c.execute("PRAGMA table_info(history)")]
+            finally:
+                c.close()
             self.assertIn("batch", cols)
         finally:
             app.DB_PATH = cur
