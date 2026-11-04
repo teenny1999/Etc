@@ -439,6 +439,10 @@ def restore_batch(con, user, batch):
                 update_site(con, user, h["entity_id"], {"deleted": 1}, action="restore")
             elif h["entity"] == "sample":
                 update_sample(con, user, h["entity_id"], {"deleted": 1}, action="restore")
+            elif h["entity"] == "standard":
+                cur = snap_standard(con, h["entity_id"])
+                if cur:
+                    save_standard(con, user, h["entity_id"], {**cur, "deleted": 1}, action="restore")
             else:
                 continue
             n += 1
@@ -1133,6 +1137,114 @@ def r_sites_bulk(h, con):
 def r_import_kml(h, con):
     with batch_scope():
         return import_kml(con, h.user, h.raw(), h.filename())
+
+
+# ---------------------------------------------------- ตาราง คพ. (Word .docx)
+
+def pcd_preview(con, data):
+    import pcd_import
+    files = data.get("files") or []
+    if not files:
+        raise ApiError(400, "ไม่ได้เลือกไฟล์")
+    rep = pcd_import.Report()
+    for f in files:
+        try:
+            raw = base64.b64decode(f.get("data") or "")
+        except (ValueError, TypeError):
+            raise ApiError(400, f"อ่านไฟล์ {f.get('name')} ไม่ได้")
+        if not raw.startswith(b"PK"):
+            rep.warnings.append(f"{f.get('name')}: ไม่ใช่ไฟล์ Word แบบ .docx (ถ้าเป็น .doc ให้เปิดใน Word แล้วบันทึกเป็น .docx)")
+            continue
+        pcd_import.parse_docx(raw, f.get("name") or "", rep)
+    out = pcd_import.report_json(rep)
+    sites = [dict(r) for r in con.execute("SELECT id, code, name, project, lat, lng FROM sites WHERE deleted=0")]
+    by_code = {}
+    for st in sites:
+        if st["code"]:
+            by_code.setdefault(st["code"].upper(), []).append(st)
+    for smp in out["samples"]:
+        project = " · ".join(x for x in [smp["place"], smp["case"]] if x) or None
+        smp["project"] = project
+        cands = by_code.get(smp["code"].upper(), [])
+        same = [c for c in cands if (c["project"] or None) == project]
+        match = same[0] if same else (cands[0] if len(cands) == 1 else None)
+        smp["site_id"] = match["id"] if match else None
+        smp["existing_sample_id"] = None
+        if match:
+            r = con.execute("SELECT id FROM samples WHERE site_id=? AND deleted=0 AND sample_code=? AND media IS ? "
+                            "AND sample_date IS ?", (match["id"], smp["sample_code"], smp["media"], smp["date"])).fetchone()
+            smp["existing_sample_id"] = r["id"] if r else None
+        prov = re.search(r"(?:จังหวัด|จ\.)\s*([ก-๙]+)", " ".join(x for x in [smp["section"], smp["location"]] if x))
+        smp["new_site"] = {
+            "code": smp["code"], "name": smp["location"] or smp["code"], "project": project,
+            "province": prov.group(1) if prov else (smp["place"] if smp["place"] and " " not in smp["place"] else None),
+            "address": smp["section"], "category": f"จุดเก็บ{MEDIA.get(smp['media'] or '', 'ตัวอย่าง')}",
+        }
+        smp["include"] = not smp["existing_sample_id"]
+    stds = load_standards(con)
+    for st in out["standards"]:
+        cur = stds.get((st["media"] or "", st["parameter"].strip().lower()))
+        st["existing"] = {"min": cur["min"], "max": cur["max"], "unit": cur["unit"]} if cur else None
+        st["include"] = st["primary"] and not cur
+    out["sites"] = sites
+    return out
+
+
+def pcd_commit(con, user, data):
+    samples = [x for x in data.get("samples") or [] if x.get("include")]
+    standards = [x for x in data.get("standards") or [] if x.get("include")]
+    if not samples and not standards:
+        raise ApiError(400, "ไม่ได้เลือกรายการที่จะนำเข้า")
+    made_sites, site_for_code, n_results, skipped = 0, {}, 0, 0
+    with batch_scope() as b:
+        for smp in samples:
+            code = (smp.get("code") or "").upper()
+            sid = smp.get("site_id") or site_for_code.get(code)
+            if sid and not con.execute("SELECT 1 FROM sites WHERE id=? AND deleted=0", (sid,)).fetchone():
+                raise ApiError(400, f"ไม่พบจุดที่เลือกให้ตัวอย่าง {smp.get('sample_code')}")
+            if not sid:
+                ns = smp.get("new_site") or {}
+                sid = create_site(con, user, {
+                    "code": ns.get("code") or smp.get("code"), "name": ns.get("name") or smp.get("code"),
+                    "project": data.get("project") or ns.get("project"), "province": ns.get("province"),
+                    "address": ns.get("address"), "category": ns.get("category"),
+                    "description": f"นำเข้าจากตาราง คพ. ({smp.get('source') or ''})"}, action="import")
+                made_sites += 1
+            site_for_code.setdefault(code, sid)
+            if con.execute("SELECT 1 FROM samples WHERE site_id=? AND deleted=0 AND sample_code IS ? AND media IS ? "
+                           "AND sample_date IS ?", (sid, smp.get("sample_code"), smp.get("media"), smp.get("date"))).fetchone():
+                skipped += 1      # นำเข้าไปแล้ว ไม่สร้างซ้ำ
+                continue
+            notes = [f"เก็บตัวอย่างวันที่ {smp['date_text']}" if smp.get("date_text") else "",
+                     f"เวลา {smp['time']}" if smp.get("time") else "",
+                     f"ลักษณะทางกายภาพ: {smp['appearance']}" if smp.get("appearance") else "",
+                     "ตัวอย่างซ้ำ (Duplicate) เพื่อควบคุมคุณภาพ" if smp.get("dup") else "",
+                     f"นำเข้าจากตาราง คพ.: {smp.get('source') or ''}"]
+            create_sample(con, user, {
+                "site_id": sid, "sample_code": smp.get("sample_code"), "media": smp.get("media"),
+                "sample_date": smp.get("date"), "notes": "\n".join(x for x in notes if x),
+                "results": smp.get("results") or []}, action="import")
+            n_results += len(smp.get("results") or [])
+        cur = {(r["media"] or "", r["parameter"].strip().lower()): r["id"]
+               for r in con.execute("SELECT id, media, parameter FROM standards WHERE deleted=0")}
+        n_std = 0
+        for st in standards:
+            k = (st.get("media") or "", (st.get("parameter") or "").strip().lower())
+            save_standard(con, user, cur.get(k), {k2: st.get(k2) for k2 in STANDARD_FIELDS},
+                          action="import" if k not in cur else "update")
+            n_std += 1
+    return {"ok": True, "batch": b, "samples": len(samples) - skipped, "skipped": skipped, "results": n_results,
+            "new_sites": made_sites, "standards": n_std}
+
+
+@route("POST", "/api/import/pcd/preview")
+def r_pcd_preview(h, con):
+    return pcd_preview(con, h.body())
+
+
+@route("POST", "/api/import/pcd/commit")
+def r_pcd_commit(h, con):
+    return pcd_commit(con, h.user, h.body())
 
 
 @route("POST", "/api/import/csv")

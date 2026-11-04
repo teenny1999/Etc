@@ -31,7 +31,7 @@ PTH = "python312._pth"
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 SRC = os.path.dirname(HERE)              # field-db/
-APP_FILES = ["app.py", "seed_demo.py", "README.md"]
+APP_FILES = ["app.py", "pcd_import.py", "seed_demo.py", "README.md"]
 
 
 def bat(lines):

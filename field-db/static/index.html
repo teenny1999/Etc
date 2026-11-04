@@ -28,6 +28,7 @@
       <summary class="btn ghost" data-i="upload">นำเข้า</summary>
       <div class="menu-items">
         <button id="btnImportKml"><b>KML / KMZ จาก Google Earth</b><span>หมุด เส้น และพื้นที่</span></button>
+        <button id="btnImportPcd"><b>ตาราง คพ. (Word .docx)</b><span>รายงานผลตรวจวิเคราะห์ ดูตัวอย่างก่อนบันทึก</span></button>
         <button id="btnImportCsv"><b>ผลวิเคราะห์จาก CSV</b><span>ไฟล์จาก Excel แบบ CSV UTF-8</span></button>
       </div>
     </details>
@@ -41,6 +42,7 @@
     </details>
     <input type="file" id="fileKml" accept=".kml,.kmz" hidden>
     <input type="file" id="fileCsv" accept=".csv,text/csv" hidden>
+    <input type="file" id="filePcd" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" multiple hidden>
   </div>
 </header>
 
@@ -236,5 +238,6 @@
 <script src="utm.js"></script>
 <script src="app.js"></script>
 <script src="chart.js"></script>
+<script src="pcd.js"></script>
 </body>
 </html>

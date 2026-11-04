@@ -647,6 +647,7 @@ function renderSites() {
       s.project && `<span>${esc(s.project)}</span>`,
       s.category && `<span>${esc(s.category)}</span>`,
       `<span>${s.n_samples ? `${s.n_samples} ตัวอย่าง · ล่าสุด ${esc(fmtDate(s.last_date))}` : 'ยังไม่มีตัวอย่าง'}</span>`,
+      s.lat == null && !s.geometry ? '<span style="color:var(--low)">ไม่มีพิกัด</span>' : '',
       s.n_photos ? `<span title="รูปถ่าย">${ic('image')}${s.n_photos}</span>` : '',
     ].filter(Boolean).join('');
     const exc = s.n_exceed ? `<div class="ex">เกินมาตรฐาน ${s.n_exceed} ค่า · ${esc(s.exceed_params.join(', '))}</div>` : '';
@@ -945,7 +946,7 @@ function renderDetail() {
   const hidden = state.hidden.has(d.id);
   const kv = [
     ['โครงการ', d.project], ['จังหวัด', d.province], ['ที่ตั้ง', d.address],
-    ['พิกัด', d.lat != null ? `${d.lat.toFixed(6)}, ${d.lng.toFixed(6)}` : 'ไม่ระบุ', true],
+    ['พิกัด', d.lat != null ? `${d.lat.toFixed(6)}, ${d.lng.toFixed(6)}` : 'ยังไม่มี — กด "ย้ายหมุด" แล้วคลิกตำแหน่งบนแผนที่ หรือ "แก้ไขข้อมูล" ใส่พิกัด', d.lat != null],
     ['UTM', u ? `${u.zone}${u.south ? 'S' : 'N'}  E ${u.E.toFixed(0)}  N ${u.N.toFixed(0)}` : '', true],
     ['ขนาด', geo ? measureGeom(geo) : ''],
     ['รายละเอียด', d.description], ['แก้ไขล่าสุด', fmtDateTime(d.updated_at)],
@@ -1258,7 +1259,7 @@ function openModal(html) {
   const first = $('#modalBody input:not([type=hidden]), #modalBody select');
   if (first) first.focus();
 }
-function closeModal() { $('#modal').hidden = true; $('#modalBody').innerHTML = ''; }
+function closeModal() { $('#modal').hidden = true; $('#modalBody').innerHTML = ''; $('.modal-box').classList.remove('wide'); }
 $('#modalClose').onclick = closeModal;
 $('#modal').addEventListener('mousedown', (e) => { if (e.target.id === 'modal') closeModal(); });
 

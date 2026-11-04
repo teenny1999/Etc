@@ -1,4 +1,5 @@
 """ทดสอบ API: python -m unittest test_app.py"""
+import base64
 import io
 import json
 import os
@@ -22,6 +23,76 @@ KML = """<?xml version="1.0" encoding="UTF-8"?>
     <Polygon><outerBoundaryIs><LinearRing><coordinates>
       101.0,13.0,0 101.1,13.0,0 101.1,13.1,0 101.0,13.0,0</coordinates></LinearRing></outerBoundaryIs></Polygon></Placemark>
 </Folder></Document></kml>"""
+
+
+def make_docx(blocks):
+    """สร้างไฟล์ .docx ขนาดเล็กสำหรับทดสอบ: blocks = ["ข้อความ", [[cell, ...], ...], ...]
+    cell เป็น str หรือ (text, {"span": n, "vmerge": "restart"|"cont"})"""
+    from xml.sax.saxutils import escape
+    def para(t):
+        return f"<w:p><w:r><w:t xml:space=\"preserve\">{escape(t)}</w:t></w:r></w:p>"
+    body = []
+    for b in blocks:
+        if isinstance(b, str):
+            body.append(para(b))
+            continue
+        rows = []
+        for row in b:
+            cells = []
+            for c in row:
+                text, opt = (c, {}) if isinstance(c, str) else c
+                pr = ""
+                if opt.get("span"):
+                    pr += f'<w:gridSpan w:val="{opt["span"]}"/>'
+                if opt.get("vmerge") == "restart":
+                    pr += '<w:vMerge w:val="restart"/>'
+                elif opt.get("vmerge") == "cont":
+                    pr += "<w:vMerge/>"
+                cells.append(f"<w:tc><w:tcPr>{pr}</w:tcPr>{para(text) if text else '<w:p/>'}</w:tc>")
+            rows.append("<w:tr>" + "".join(cells) + "</w:tr>")
+        body.append("<w:tbl>" + "".join(rows) + "</w:tbl>")
+    doc = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+           '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>'
+           + "".join(body) + "</w:body></w:document>")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("[Content_Types].xml", "<Types/>")
+        z.writestr("word/document.xml", doc)
+    return buf.getvalue()
+
+
+V = lambda t, m: (t, {"vmerge": m})
+PCD_DOC = [
+    "ผลตรวจวิเคราะห์ตัวอย่างคุณภาพสิ่งแวดล้อม",
+    "สถานที่/โครงการ/โรงงานบริษัท      ทดสอบจังหวัด",
+    "สถานการณ์      พื้นที่ลักลอบทิ้ง",
+    "เก็บตัวอย่างวันที่       21-23 กันยายน 2569",
+    "ประเภทตัวอย่าง      น้ำผิวดิน",
+    [["ลำดับ", "รหัสตัวอย่าง", "เวลา", "รายละเอียดจุดเก็บตัวอย่าง", "ลักษณะทางกายภาพ", "pH", "DO (mg/l)"],
+     ["1", "W1", "15.02 น.", "คลองหน้าวัด ต.หนองบอน", "น้ำตาล", "7.46", "3.27"],
+     ["2", "W2", "15.50 น.", "บ่อน้ำดิบ", "ใส", "8.63", "7.99"],
+     [("มาตรฐานคุณภาพน้ำในแหล่งน้ำผิวดิน(1)", {"span": 5}), "5.0 – 9.0", "> 4"],
+     [("มาตรฐานน้ำทิ้งจากโรงงาน(2)", {"span": 5}), "5.0 – 9.0", "-"]],
+    "(1) ประกาศคณะกรรมการสิ่งแวดล้อมแห่งชาติ ฉบับที่ 8 (พ.ศ. 2537)",
+    "(2) การเกษตร)",
+    "(2) ประกาศกระทรวงอุตสาหกรรม เรื่อง น้ำทิ้งจากโรงงาน",
+    [[V("ลำดับ", "restart"), V("รหัสตัวอย่าง", "restart"), V("เวลา", "restart"), ("Heavy metals (mg/l)", {"span": 2})],
+     [V("", "cont"), V("", "cont"), V("", "cont"), "Pb", "Total Hg"],
+     ["1", "W1", "15.02 น.", "0.12", "<0.0005"],
+     ["2", "W2", "15.50 น.", "<0.01", "0.0007"],
+     [("มาตรฐานคุณภาพน้ำในแหล่งน้ำผิวดิน(1)", {"span": 3}), "<0.05", "<0.002"]],
+    "(1) ประกาศคณะกรรมการสิ่งแวดล้อมแห่งชาติ ฉบับที่ 8 (พ.ศ. 2537)",
+    [[V("พารามิเตอร์", "restart"), ("จุดเก็บตัวอย่าง", {"span": 2}), V("มาตรฐานคุณภาพน้ำผิวดิน*", "restart")],
+     [V("", "cont"), "W1", "W1 (Dup)", V("", "cont")],
+     [("สารอินทรีย์ระเหยง่าย (ไมโครกรัมต่อลิตร)", {"span": 4})],
+     ["Toluene", "14", "15", "-"], ["Benzene", "ND", "ND", "-"]],
+    "ประเภทตัวอย่าง      ดิน",
+    [[V("รหัสตัวอย่าง", "restart"), V("รายละเอียดจุดเก็บตัวอย่าง", "restart"), ("Heavy metals (mg/kg)", {"span": 1})],
+     [V("", "cont"), V("", "cont"), "Pb"],
+     [("อำเภอวัฒนานคร จังหวัดสระแก้ว", {"span": 3})],
+     ["S1", "จุดที่ 1 ติดกองกาก", "792"],
+     [("มาตรฐานคุณภาพดิน(1)", {"span": 2}), "35,040"]],
+]
 
 
 class ApiTest(unittest.TestCase):
@@ -204,6 +275,58 @@ class ApiTest(unittest.TestCase):
         # เปิดโปรแกรมซ้ำต้องรู้ว่าพอร์ตไม่ว่าง (บน Windows ถ้าไม่ระวังจะจองซ้อนได้)
         with self.assertRaises(OSError):
             app.make_server("127.0.0.1", self.srv.server_address[1])
+
+    def test_pcd_word_table_import(self):
+        raw = make_docx(PCD_DOC)
+        payload = {"files": [{"name": "ตาราง.docx", "data": base64.b64encode(raw).decode()}]}
+        st, pv = self.call("POST", "/api/import/pcd/preview", payload)
+        self.assertEqual(st, 200, pv)
+        by = {x["sample_code"]: x for x in pv["samples"]}
+        self.assertEqual(sorted(by), ["S1", "W1", "W1-Dup", "W2"])
+        w1 = {r["parameter"]: (r["value_text"], r["unit"]) for r in by["W1"]["results"]}
+        self.assertEqual(w1["DO"], ("3.27", "mg/L"))
+        self.assertEqual(w1["Pb"], ("0.12", "mg/L"))                 # หัวตาราง 2 ชั้น (Heavy metals)
+        self.assertEqual(w1["Total Hg"], ("<0.0005", "mg/L"))
+        self.assertEqual(w1["Toluene"], ("14", "µg/L"))               # ตารางแนวพารามิเตอร์ (VOCs)
+        self.assertEqual(by["W1-Dup"]["results"][0]["value_text"], "15")
+        self.assertEqual((by["W1"]["date"], by["W1"]["date_end"], by["W1"]["media"]), ("2026-09-21", "2026-09-23", "surface_water"))
+        self.assertEqual((by["W1"]["time"], by["W1"]["appearance"]), ("15.02 น.", "น้ำตาล"))
+        self.assertEqual(by["S1"]["media"], "soil")
+        self.assertEqual(by["S1"]["new_site"]["province"], "สระแก้ว")  # จากแถวหัวข้ออำเภอ/จังหวัด
+        self.assertEqual(by["W1"]["project"], "ทดสอบจังหวัด · พื้นที่ลักลอบทิ้ง")
+        std = {(x["media"], x["parameter"]): x for x in pv["standards"]}
+        self.assertEqual((std[("surface_water", "pH")]["min"], std[("surface_water", "pH")]["max"]), (5.0, 9.0))
+        self.assertEqual(std[("surface_water", "DO")]["min"], 4.0)
+        self.assertEqual(std[("surface_water", "Total Hg")]["max"], 0.002)
+        self.assertEqual(std[("soil", "Pb")]["max"], 35040.0)
+        self.assertTrue(std[("wastewater", "pH")]["reference"].startswith("ประกาศกระทรวงอุตสาหกรรม"))  # ไม่ใช่ "(2) การเกษตร)"
+
+        st, r = self.call("POST", "/api/import/pcd/commit", {"samples": pv["samples"], "standards": pv["standards"]})
+        self.assertEqual(st, 200, r)
+        self.assertEqual((r["samples"], r["new_sites"]), (4, 3))      # W1 กับ W1-Dup อยู่จุดเดียวกัน
+        _, sites = self.call("GET", "/api/sites")
+        w1site = next(x for x in sites if x["code"] == "W1")
+        self.assertEqual(w1site["n_samples"], 2)
+        self.assertIn("Pb", w1site["exceed_params"])                  # 0.12 > 0.05 จากค่ามาตรฐานที่นำเข้า
+
+        _, pv2 = self.call("POST", "/api/import/pcd/preview", payload)   # นำเข้าซ้ำ: จับคู่จุดเดิม + ข้ามตัวอย่างเดิม
+        by2 = {x["sample_code"]: x for x in pv2["samples"]}
+        self.assertEqual(by2["W1"]["site_id"], w1site["id"])
+        self.assertTrue(by2["W1"]["existing_sample_id"])
+        self.assertFalse(any(x["include"] for x in pv2["samples"]))
+
+        forced = [dict(x, include=True) for x in pv2["samples"]]          # บังคับเลือกซ้ำ -> เซิร์ฟเวอร์ต้องข้ามเอง
+        _, r2 = self.call("POST", "/api/import/pcd/commit", {"samples": forced, "standards": []})
+        self.assertEqual((r2["samples"], r2["skipped"]), (0, 4))
+        self.call("POST", f"/api/history/batch/{r['batch']}/restore")   # ย้อนการนำเข้าทั้งชุด
+        _, sites = self.call("GET", "/api/sites")
+        self.assertFalse([x for x in sites if x["code"] in ("W1", "W2", "S1")])
+        _, stds = self.call("GET", "/api/standards")
+        self.assertFalse([x for x in stds if x["parameter"] == "Total Hg"])
+
+        st, pv3 = self.call("POST", "/api/import/pcd/preview", {"files": [{"name": "x.doc", "data": base64.b64encode(b"\xd0\xcf").decode()}]})
+        self.assertEqual(pv3["samples"], [])
+        self.assertTrue(pv3["warnings"])
 
     def test_validation(self):
         st, r = self.call("POST", "/api/sites", {"name": ""})
