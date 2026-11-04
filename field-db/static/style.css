@@ -308,7 +308,8 @@ table.data td.empty { text-align: center; color: var(--muted); padding: 28px; }
   text-shadow: 0 0 2px #000, 0 0 3px #000, 0 1px 4px rgba(0, 0, 0, .9);
 }
 .leaflet-tooltip.gl::before { display: none; }
-.hide-labels .leaflet-tooltip.gl { display: none; }
+.hide-labels .leaflet-tooltip.pin-label { display: none; }
+.hide-shape-labels .leaflet-tooltip.shape-label { display: none; }
 
 /* แผงรายละเอียดจุด */
 .detail {
@@ -619,3 +620,13 @@ label.field > select, label.field > input { color: var(--ink); font-weight: 400;
   .photo-row img { width: 76px; height: 76px; }
   .photo-fields { grid-template-columns: 1fr; }
 }
+
+/* เมนู "แสดง" บนแผนที่ */
+.view-items { min-width: 250px; padding: 8px 10px; display: flex; flex-direction: column; gap: 8px; color: var(--ink); font-size: 13.5px; }
+.view-items .check { font-size: 13.5px; }
+.view-items .sub { display: flex; align-items: center; gap: 8px; padding-left: 22px; font-size: 13px; color: var(--muted); }
+.view-items .sub select { min-height: 28px; padding: 2px 24px 2px 8px; font-size: 13px; }
+.view-items hr { border: 0; border-top: 1px solid var(--line); margin: 2px 0; width: 100%; }
+.view-items input[type=checkbox] { accent-color: var(--ink); }
+.view-items label:has(input:disabled) { opacity: .5; }
+.chart-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

@@ -15,6 +15,7 @@ const state = {
   selectedId: null, detail: null,
   mode: null, drawPts: [], drawTarget: null,
   selectMode: false, picked: new Set(),
+  view: { labels: true, shapes: true, shapeLabels: true },
   hidden: new Set(),   // จุดที่ผู้ใช้ซ่อนบนแผนที่ (จำไว้ในเบราว์เซอร์นี้เท่านั้น)
   resultSort: { key: 'sample_date', desc: true },
 };
@@ -129,7 +130,8 @@ function renderMap() {
     if (state.hidden.has(s.id) && s.id !== state.selectedId) continue;
     if (state.mode === 'edit' && state.drawTarget === s.id) continue;   // กำลังแก้รูปร่าง: แสดงเฉพาะตัวที่แก้
     const st = siteStatus(s);
-    const g = parseGeom(s.geometry);
+    const g = state.view.shapes ? parseGeom(s.geometry) : null;
+    if (!state.view.shapes && parseGeom(s.geometry)?.type === 'LineString') continue;   // เส้นไม่มีหมุด ซ่อนทั้งเส้น
     if (g) {
       const isLine = g.type === 'LineString';
       const hot = s.id === state.selectedId || state.picked.has(s.id);
@@ -140,7 +142,7 @@ function renderMap() {
       lyr.on('click', (e) => siteClick(s.id, e.latlng)).addTo(siteLayer);
       if (isLine) {   // เส้น: ไม่มีหมุด (เหมือน path ใน Google Earth) ป้ายชื่อ + ความยาวติดกลางเส้น
         const pts = g.coordinates.map(toLL);
-        L.tooltip({ permanent: true, direction: 'top', offset: [0, -4], className: 'gl measure-tip', interactive: false })
+        L.tooltip({ permanent: true, direction: 'top', offset: [0, -4], className: 'gl measure-tip shape-label', interactive: false })
           .setLatLng(lineMid(pts)).setContent(`${esc(siteLabel(s))} · ${fmtDist(pathLen(pts))}`).addTo(siteLayer);
         continue;
       }
@@ -155,7 +157,7 @@ function renderMap() {
       })(),
     });
     const m = L.marker([s.lat, s.lng], { icon, title: [s.code, s.name].filter(Boolean).join(' — ') })
-      .bindTooltip(esc(siteLabel(s)), { permanent: true, direction: 'right', className: 'gl', offset: [8, 0] })
+      .bindTooltip(esc(siteLabel(s)), { permanent: true, direction: 'right', className: 'gl pin-label', offset: [8, 0] })
       .on('click', () => siteClick(s.id))
       .addTo(siteLayer);
     markers.set(s.id, m);
@@ -834,7 +836,22 @@ $('#siteSearch').addEventListener('keydown', (e) => {
 });
 $('#labelField').addEventListener('change', () => { store.set('labelField', $('#labelField').value); renderMap(); });
 $('#labelField').value = store.get('labelField', 'code');
-$('#showLabels').addEventListener('change', () => $('#map').classList.toggle('hide-labels', !$('#showLabels').checked));
+// เมนู "แสดง": เปิด/ปิด ป้ายชื่อหมุด, รูปร่างที่วาด, ป้ายบนเส้น (จำไว้ในเบราว์เซอร์นี้)
+function applyView(save = true) {
+  const v = state.view;
+  v.labels = $('#showLabels').checked; v.shapes = $('#showShapes').checked; v.shapeLabels = $('#showShapeLabels').checked;
+  $('#map').classList.toggle('hide-labels', !v.labels);
+  $('#map').classList.toggle('hide-shape-labels', !v.shapeLabels);
+  $('#labelField').disabled = !v.labels;
+  $('#showShapeLabels').disabled = !v.shapes;
+  if (save) store.set('view', JSON.stringify(v));
+  renderMap();
+}
+try {
+  const v = JSON.parse(store.get('view', '{}'));
+  ['labels', 'shapes', 'shapeLabels'].forEach((k, i) => { if (typeof v[k] === 'boolean') $(['#showLabels', '#showShapes', '#showShapeLabels'][i]).checked = v[k]; });
+} catch { /* ignore */ }
+['#showLabels', '#showShapes', '#showShapeLabels'].forEach((id) => $(id).addEventListener('change', () => applyView()));
 $('#btnFit').onclick = fitAll;
 $('#btnAddPoint').onclick = () => setMode(state.mode === 'add-point' ? null : 'add-point');
 $('#btnAddArea').onclick = () => setMode(state.mode === 'draw' ? null : 'draw');
@@ -1724,7 +1741,7 @@ $('#userName').value = store.get('user', '');
 $('#userName').addEventListener('input', (e) => { store.set('user', e.target.value.trim()); e.target.classList.remove('need'); });
 document.addEventListener('click', (e) => {  // ปิดเมนูเมื่อคลิกที่อื่น หรือเลือกรายการแล้ว
   $$('.menu').forEach((m) => {
-    if (m.open && (!m.contains(e.target) || e.target.closest('.menu-items'))) m.open = false;
+    if (m.open && (!m.contains(e.target) || (e.target.closest('.menu-items') && !e.target.closest('.view-items')))) m.open = false;
   });
 });
 $$('.menu').forEach((m) => m.addEventListener('toggle', () => {
@@ -1732,6 +1749,7 @@ $$('.menu').forEach((m) => m.addEventListener('toggle', () => {
 }));
 hydrateIcons();
 moveSlider(true);
+applyView(false);
 (async () => {
   await guard(reloadAll);
   if (state.sites.length) fitAll();

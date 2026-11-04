@@ -10,7 +10,7 @@ const TrendChart = (() => {
   };
   const MAX_SERIES = PALETTE.light.length;
   const darkQ = matchMedia('(prefers-color-scheme: dark)');
-  const CH = { param: '', media: '', range: '', from: '', to: '', view: 'chart', siteIds: [], slots: new Map() };
+  const CH = { labels: store.get('chartLabels', '1') === '1', param: '', media: '', range: '', from: '', to: '', view: 'chart', siteIds: [], slots: new Map() };
   let hoverIdx = null;
 
   const key = (p) => (p || '').trim().toLowerCase();
@@ -177,7 +177,7 @@ const TrendChart = (() => {
   function drawSvg(box, series, plotted, std) {
     const W = Math.max(box.clientWidth, 280);
     const H = W < 560 ? 250 : 320;
-    const direct = series.length <= 4 && W >= 560;   // จอแคบ: ใช้คำอธิบายสีด้านบนแทนป้ายปลายเส้น
+    const direct = CH.labels && series.length <= 4 && W >= 560;   // จอแคบ: ใช้คำอธิบายสีด้านบนแทนป้ายปลายเส้น
     const m = { l: 54, r: direct ? 104 : 18, t: 16, b: 32 };
     const iw = W - m.l - m.r, ih = H - m.t - m.b;
 
@@ -210,12 +210,12 @@ const TrendChart = (() => {
     if (std?.max != null && std.max <= y1) {
       g += `<rect x="${m.l}" y="${m.t}" width="${iw}" height="${Math.max(0, Y(std.max) - m.t)}" fill="${exceedC}" opacity=".07"/>`;
       g += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(std.max)}" y2="${Y(std.max)}" stroke="${exceedC}" stroke-width="1.5" stroke-dasharray="5 4"/>`;
-      g += `<text class="std-label" x="${m.l + 6}" y="${Y(std.max) - 6}">เกณฑ์สูงสุด ${fmtN(std.max)}</text>`;
+      if (CH.labels) g += `<text class="std-label" x="${m.l + 6}" y="${Y(std.max) - 6}">เกณฑ์สูงสุด ${fmtN(std.max)}</text>`;
     }
     if (std?.min != null && std.min >= y0) {
       g += `<rect x="${m.l}" y="${Y(std.min)}" width="${iw}" height="${Math.max(0, m.t + ih - Y(std.min))}" fill="${lowC}" opacity=".07"/>`;
       g += `<line x1="${m.l}" x2="${W - m.r}" y1="${Y(std.min)}" y2="${Y(std.min)}" stroke="${lowC}" stroke-width="1.5" stroke-dasharray="5 4"/>`;
-      g += `<text class="std-label" x="${m.l + 6}" y="${Y(std.min) + 15}">เกณฑ์ต่ำสุด ${fmtN(std.min)}</text>`;
+      if (CH.labels) g += `<text class="std-label" x="${m.l + 6}" y="${Y(std.min) + 15}">เกณฑ์ต่ำสุด ${fmtN(std.min)}</text>`;
     }
     // เส้นและจุดของแต่ละจุดเก็บตัวอย่าง
     const ends = [];
@@ -338,6 +338,8 @@ const TrendChart = (() => {
   $('#cFrom').addEventListener('change', (e) => { CH.from = e.target.value; render(); });
   $('#cTo').addEventListener('change', (e) => { CH.to = e.target.value; render(); });
   $('#cAddSite').addEventListener('change', (e) => { if (e.target.value) addSite(+e.target.value); render(); });
+  $('#cLabels').checked = CH.labels;
+  $('#cLabels').addEventListener('change', (e) => { CH.labels = e.target.checked; store.set('chartLabels', CH.labels ? '1' : '0'); render(); });
   $('#cAuto').addEventListener('click', () => { autoPick(); render(); });
   $('#cSiteChips').addEventListener('click', (e) => {
     const b = e.target.closest('[data-remove]');

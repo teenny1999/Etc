@@ -128,8 +128,9 @@
       <div class="chart-card">
         <div class="chart-head">
           <div><div class="chart-title" id="cTitle"></div><div class="muted small" id="cSub"></div></div>
+          <div class="chart-tools"><label class="check"><input type="checkbox" id="cLabels" checked> ป้ายบนกราฟ</label>
           <div class="seg" role="group" aria-label="มุมมอง">
-            <button data-view="chart" class="on">กราฟ</button><button data-view="table">ตาราง</button></div>
+            <button data-view="chart" class="on">กราฟ</button><button data-view="table">ตาราง</button></div></div>
         </div>
         <div class="chart-legend" id="cLegend"></div>
         <div class="chart" id="chart"></div>
@@ -184,12 +185,21 @@
   <div class="map-wrap">
     <div id="map"></div>
     <div class="map-toolbar glass">
-      <label class="check"><input type="checkbox" id="showLabels" checked> ป้ายชื่อ</label>
-      <select id="labelField" aria-label="ข้อความบนป้าย">
-        <option value="code">รหัส</option>
-        <option value="name">ชื่อ</option>
-        <option value="both">รหัส + ชื่อ</option>
-      </select>
+      <details class="menu" id="viewMenu">
+        <summary class="btn small on-glass" data-i="eye">แสดง</summary>
+        <div class="menu-items left view-items">
+          <label class="check"><input type="checkbox" id="showLabels" checked> ป้ายชื่อหมุด</label>
+          <label class="sub">ข้อความบนป้าย
+            <select id="labelField">
+              <option value="code">รหัส</option>
+              <option value="name">ชื่อ</option>
+              <option value="both">รหัส + ชื่อ</option>
+            </select></label>
+          <hr>
+          <label class="check"><input type="checkbox" id="showShapes" checked> เส้น / พื้นที่ / วงกลมที่วาด</label>
+          <label class="check"><input type="checkbox" id="showShapeLabels" checked> ป้ายชื่อและระยะบนเส้น</label>
+        </div>
+      </details>
       <button class="btn small on-glass" id="btnFit" data-i="fit">ดูทุกจุด</button>
       <button class="btn small on-glass" id="btnRuler" data-i="ruler" title="วัดระยะทางและพื้นที่ (ไม่บันทึก)">วัดระยะ</button>
     </div>
