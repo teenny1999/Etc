@@ -18,6 +18,12 @@ import sys
 import urllib.request
 import zipfile
 
+for _s in (sys.stdout, sys.stderr):  # คอนโซล Windows (cp1252) พิมพ์ภาษาไทยไม่ได้ -> อย่าให้ล้ม
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 PY_VERSION = "3.12.10"
 PY_URL = f"https://www.python.org/ftp/python/{PY_VERSION}/python-{PY_VERSION}-embed-amd64.zip"
 PY_SHA256 = "4acbed6dd1c744b0376e3b1cf57ce906f9dc9e95e68824584c8099a63025a3c3"

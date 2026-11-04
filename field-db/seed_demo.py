@@ -11,6 +11,12 @@ import sys
 
 import app
 
+for _s in (sys.stdout, sys.stderr):  # คอนโซล Windows (cp1252) พิมพ์ภาษาไทยไม่ได้ -> อย่าให้ล้ม
+    try:
+        _s.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
+
 path = sys.argv[1] if len(sys.argv) > 1 else os.path.join(app.HERE, "data", "demo.db")
 if os.path.exists(path):
     sys.exit(f"มีไฟล์ {path} อยู่แล้ว — ลบทิ้งก่อนถ้าต้องการสร้างใหม่")
