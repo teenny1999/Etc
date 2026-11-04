@@ -14,6 +14,7 @@ const state = {
   sites: [], results: [], standards: [],
   selectedId: null, detail: null,
   mode: null, drawPts: [], drawTarget: null,
+  selectMode: false, picked: new Set(),
   resultSort: { key: 'sample_date', desc: true },
 };
 
@@ -56,13 +57,15 @@ async function api(method, url, body, headers = {}) {
 }
 
 let toastTimer;
-function toast(msg, err = false) {
+function toast(msg, err = false, action = null) {
   const t = $('#toast');
-  t.innerHTML = ic(err ? 'alert' : 'check') + `<span>${esc(msg)}</span>`;
+  t.innerHTML = ic(err ? 'alert' : 'check') + `<span>${esc(msg)}</span>`
+    + (action ? `<button class="toast-action">${ic('undo')}${esc(action.label)}</button>` : '');
   t.className = 'toast' + (err ? ' err' : '');
   t.hidden = true; void t.offsetWidth; t.hidden = false;  // เล่นแอนิเมชันใหม่ทุกครั้ง
+  if (action) $('.toast-action', t).onclick = () => { t.hidden = true; action.fn(); };
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.hidden = true; }, err ? 6000 : 3000);
+  toastTimer = setTimeout(() => { t.hidden = true; }, action ? 10000 : err ? 6000 : 3000);
 }
 async function guard(fn) {
   try { return await fn(); } catch (e) { console.error(e); toast(e.message, true); }
@@ -128,7 +131,7 @@ function renderMap() {
       L.geoJSON(g, {
         style: { color: st === 'exceed' ? '#ff5a45' : '#f6f3e8', weight: 2, dashArray: st === 'exceed' ? null : '6 4', fillColor: st === 'exceed' ? '#ff5a45' : '#ffffff', fillOpacity: 0.12 },
         pointToLayer: (f, ll) => L.circleMarker(ll, { radius: 4 }),
-      }).on('click', () => selectSite(s.id)).addTo(siteLayer);
+      }).on('click', () => siteClick(s.id)).addTo(siteLayer);
     }
     if (s.lat == null || s.lng == null) continue;
     const icon = L.divIcon({
@@ -136,12 +139,12 @@ function renderMap() {
       html: (() => {
         const dropping = drop.first || drop.ids.has(s.id);
         const delay = drop.first ? ` style="animation-delay:${Math.round(n++ * step)}ms"` : '';
-        return `<div class="pin ${st}${s.id === state.selectedId ? ' sel' : ''}${dropping ? ' drop' : ''}"${delay}></div>`;
+        return `<div class="pin ${st}${s.id === state.selectedId ? ' sel' : ''}${state.picked.has(s.id) ? ' picked' : ''}${dropping ? ' drop' : ''}"${delay}></div>`;
       })(),
     });
     const m = L.marker([s.lat, s.lng], { icon, title: [s.code, s.name].filter(Boolean).join(' — ') })
       .bindTooltip(esc(siteLabel(s)), { permanent: true, direction: 'right', className: 'gl', offset: [8, 0] })
-      .on('click', () => selectSite(s.id))
+      .on('click', () => siteClick(s.id))
       .addTo(siteLayer);
     markers.set(s.id, m);
   }
@@ -246,7 +249,8 @@ document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape') return;
   if (!$('#lightbox').hidden) { $('#lightbox').hidden = true; return; }
   if (!$('#modal').hidden) { closeModal(); return; }
-  if (state.mode) setMode(null);
+  if (state.mode) { setMode(null); return; }
+  if (state.selectMode) setSelectMode(false);
 });
 
 // ---------------------------------------------------------- loading data ---
@@ -259,7 +263,10 @@ async function reloadAll() {
   renderSites();
   renderResults();
   renderStandards();
+  for (const id of [...state.picked]) if (!state.sites.some((x) => x.id === id)) state.picked.delete(id);
+  updateBulkBar();
   if ($('#tab-history').classList.contains('active')) renderHistoryTab();
+  if (typeof TrendChart !== 'undefined') TrendChart.onData();
 }
 
 function fillOptions(sel, values, labelFn = (v) => v) {
@@ -324,7 +331,10 @@ const chip = (m) => `<span class="chip m-${esc(m || 'other')}">${esc(mediaLabel(
 function renderSites() {
   const list = filteredSites();
   $('#cntSites').textContent = state.sites.length || '';
+  $('#siteCount').textContent = list.length === state.sites.length ? `${list.length} จุด`
+    : `แสดง ${list.length} จาก ${state.sites.length} จุด`;
   const ul = $('#siteList');
+  ul.classList.toggle('selecting', state.selectMode);
   ul.innerHTML = list.length ? list.map((s, i) => {
     const st = siteStatus(s);
     const sub = [
@@ -336,18 +346,123 @@ function renderSites() {
     const exc = s.n_exceed ? `<div class="ex">เกินมาตรฐาน ${s.n_exceed} ค่า · ${esc(s.exceed_params.join(', '))}</div>` : '';
     const chips = s.media.length ? `<div class="chips">${s.media.map(chip).join('')}</div>` : '';
     const delay = ul.classList.contains('first') ? ` style="animation-delay:${Math.min(i * 30, 450)}ms"` : '';
-    return `<li data-id="${s.id}" class="${s.id === state.selectedId ? 'sel' : ''}"${delay}>
-      <span class="dot ${st}" title="${{ exceed: 'เกินมาตรฐาน', ok: 'ผ่านเกณฑ์', nodata: 'ยังไม่มีผลที่เทียบเกณฑ์ได้' }[st]}"></span>
+    const pick = state.selectMode ? `<input type="checkbox" class="pick" tabindex="-1" aria-label="เลือก ${esc(s.code || s.name)}" ${state.picked.has(s.id) ? 'checked' : ''}>` : '';
+    return `<li data-id="${s.id}" class="${s.id === state.selectedId ? 'sel' : ''}${state.picked.has(s.id) ? ' picked' : ''}"${delay}>
+      ${pick}<span class="dot ${st}" title="${{ exceed: 'เกินมาตรฐาน', ok: 'ผ่านเกณฑ์', nodata: 'ยังไม่มีผลที่เทียบเกณฑ์ได้' }[st]}"></span>
       <div style="min-width:0"><div class="t">${s.code ? `<span class="code">${esc(s.code)}</span>` : ''}<span class="name">${esc(s.name)}</span>${s.geometry ? ic('area') : ''}</div>
       <div class="s">${sub}</div>${exc}${chips}</div></li>`;
   }).join('') : `<li class="empty">${state.sites.length ? 'ไม่มีจุดที่ตรงกับคำค้นหรือตัวกรอง'
     : 'ยังไม่มีข้อมูล<br>กด “เพิ่มจุดบนแผนที่” หรือนำเข้าไฟล์ KML/KMZ จาก Google Earth'}</li>`;
   if (list.length) setTimeout(() => ul.classList.remove('first'), 800);
   renderMap();
+  updateBulkBar();
 }
+
+// ------------------------------------------------- เลือกหลายจุด (แก้/ลบ/กราฟ พร้อมกัน) ---
+function siteClick(id) {
+  if (state.selectMode) togglePick(id); else selectSite(id);
+}
+function togglePick(id) {
+  if (state.picked.has(id)) state.picked.delete(id); else state.picked.add(id);
+  renderSites();
+}
+function setSelectMode(on) {
+  state.selectMode = on;
+  if (!on) state.picked.clear();
+  $('#btnSelect').classList.toggle('active', on);
+  renderSites();
+}
+function updateBulkBar() {
+  const n = state.picked.size, shown = filteredSites();
+  $('#bulkBar').hidden = !state.selectMode;
+  $('#bulkCount').textContent = n;
+  const notPicked = shown.filter((s) => !state.picked.has(s.id)).length;
+  $('#bulkAll').textContent = notPicked ? `เลือกทั้งหมดที่แสดง (${shown.length})` : '';
+  $('#bulkAll').hidden = !notPicked;
+  $('#bulkClear').hidden = !n;
+  ['#bulkChart', '#bulkEdit', '#bulkDelete'].forEach((b) => { $(b).disabled = !n; });
+}
+$('#btnSelect').onclick = () => setSelectMode(!state.selectMode);
+$('#bulkDone').onclick = () => setSelectMode(false);
+$('#bulkAll').onclick = () => { filteredSites().forEach((s) => state.picked.add(s.id)); renderSites(); };
+$('#bulkClear').onclick = () => { state.picked.clear(); renderSites(); };
+$('#bulkChart').onclick = () => TrendChart.open({ param: '', siteIds: [...state.picked] });
+
+async function restoreBatch(batch) {
+  await guard(async () => {
+    const r = await api('POST', `/api/history/batch/${batch}/restore`);
+    toast(`ย้อนกลับแล้ว ${r.restored} รายการ`);
+    await reloadAll();
+    if (state.selectedId && !state.sites.find((x) => x.id === state.selectedId)) closeDetail();
+    else if (state.selectedId) await selectSite(state.selectedId, false);
+  });
+}
+const pickedSites = () => state.sites.filter((x) => state.picked.has(x.id));
+function pickedPreview(list) {
+  const names = list.slice(0, 12).map((x) => `<span class="chip">${esc(x.code || x.name)}</span>`).join(' ');
+  return `<div class="chips" style="margin-bottom:14px">${names}${list.length > 12 ? ` <span class="muted small">และอีก ${list.length - 12} จุด</span>` : ''}</div>`;
+}
+$('#bulkDelete').onclick = () => {
+  const list = pickedSites();
+  if (!list.length || !needUser()) return;
+  if (!confirm(`ลบ ${list.length} จุดที่เลือก?\n(ตัวอย่างและผลวิเคราะห์ของจุดเหล่านี้จะถูกซ่อนไปด้วย กดย้อนกลับได้จากประวัติ)`)) return;
+  guard(async () => {
+    const r = await api('POST', '/api/sites/bulk', { ids: list.map((x) => x.id), action: 'delete' });
+    state.picked.clear();
+    if (state.selectedId && list.some((x) => x.id === state.selectedId)) closeDetail();
+    await reloadAll();
+    toast(`ลบแล้ว ${r.count} จุด`, false, { label: 'ย้อนกลับ', fn: () => restoreBatch(r.batch) });
+  });
+};
+const BULK_FIELDS = [
+  ['project', 'โครงการ / เรื่อง', 'dlProjects'], ['category', 'ประเภทจุด', 'dlCategories'],
+  ['province', 'จังหวัด', 'dlProvinces'], ['address', 'ที่ตั้ง (ต./อ./จ.)', ''], ['description', 'รายละเอียด / หมายเหตุ', ''],
+];
+$('#bulkEdit').onclick = () => {
+  const list = pickedSites();
+  if (!list.length || !needUser()) return;
+  const current = (k) => {
+    const vals = [...new Set(list.map((x) => x[k] || ''))];
+    return vals.length === 1 ? (vals[0] ? `ปัจจุบัน: ${vals[0]}` : 'ปัจจุบัน: (ว่าง)') : `ปัจจุบันมี ${vals.length} ค่าต่างกัน`;
+  };
+  openModal(`<h2>แก้ไขพร้อมกัน ${list.length} จุด</h2>
+    ${pickedPreview(list)}
+    <form id="bulkForm">
+      <p class="note" style="margin-bottom:12px">ติ๊กเฉพาะช่องที่ต้องการเปลี่ยน ช่องที่ไม่ติ๊กจะคงค่าเดิมของแต่ละจุด
+        (ติ๊กแล้วเว้นว่าง = ล้างค่าช่องนั้น) · รหัส ชื่อ และพิกัดแก้ได้ทีละจุดเท่านั้น</p>
+      <div class="bulk-fields">${BULK_FIELDS.map(([k, label, dl]) => `
+        <label class="bulk-on"><input type="checkbox" data-on="${k}"> ${label}</label>
+        ${k === 'description' ? `<textarea name="${k}" rows="2" placeholder="${esc(current(k))}"></textarea>`
+          : `<input name="${k}" ${dl ? `list="${dl}"` : ''} placeholder="${esc(current(k))}">`}`).join('')}
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn" id="bulkCancel">ยกเลิก</button>
+        <button class="btn primary" id="bulkSave" disabled>${ic('check')}บันทึก ${list.length} จุด</button>
+      </div>
+    </form>`);
+  const form = $('#bulkForm');
+  const sync = () => { $('#bulkSave').disabled = !$$('[data-on]:checked', form).length; };
+  form.addEventListener('input', (e) => {
+    if (e.target.name) { $(`[data-on="${e.target.name}"]`, form).checked = true; }
+    sync();
+  });
+  $('#bulkCancel').onclick = closeModal;
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    const fields = {};
+    $$('[data-on]:checked', form).forEach((c) => { fields[c.dataset.on] = form.elements[c.dataset.on].value; });
+    guard(async () => {
+      const r = await api('POST', '/api/sites/bulk', { ids: list.map((x) => x.id), action: 'update', fields });
+      closeModal();
+      await reloadAll();
+      if (state.selectedId && state.picked.has(state.selectedId)) await selectSite(state.selectedId, false);
+      toast(`แก้ไขแล้ว ${r.count} จุด`, false, { label: 'ย้อนกลับ', fn: () => restoreBatch(r.batch) });
+    });
+  };
+};
 $('#siteList').addEventListener('click', (e) => {
   const li = e.target.closest('li[data-id]');
-  if (li) selectSite(+li.dataset.id);
+  if (li) siteClick(+li.dataset.id);
 });
 ['#siteSearch', '#fProject', '#fMedia', '#fStatus', '#fSort'].forEach((s) =>
   $(s).addEventListener(s === '#siteSearch' ? 'input' : 'change', renderSites));
@@ -419,6 +534,21 @@ function gauge(r) {
 }
 const compareCell = (r) => `<span class="cmp">${gauge(r)}${verdict(r)}</span>`;
 
+// ค่าครั้งก่อนของพารามิเตอร์เดียวกัน (ตัวอย่างประเภทเดียวกัน ที่เก็บก่อนหน้า) เพื่อเทียบกับอดีตได้ทันที
+function prevHint(sample, r) {
+  const k = r.parameter.trim().toLowerCase();
+  const older = state.detail.samples.filter((x) => x.media === sample.media && x.id !== sample.id
+    && (x.sample_date || '') < (sample.sample_date || ''));
+  for (const o of older) {  // samples เรียงจากใหม่ไปเก่าแล้ว ตัวแรกที่เจอคือครั้งก่อนหน้า
+    const p = o.results.find((x) => x.parameter.trim().toLowerCase() === k);
+    if (!p) continue;
+    let arrow = '';
+    if (r.value != null && p.value != null && p.value !== r.value) arrow = r.value > p.value ? '↑ ' : '↓ ';
+    return `<div class="prev" title="ครั้งก่อน ${esc(fmtDate(o.sample_date))}">${arrow}ครั้งก่อน ${esc(p.value_text)}</div>`;
+  }
+  return '';
+}
+
 function renderDetail() {
   const d = state.detail;
   const el = $('#detail');
@@ -445,7 +575,9 @@ function renderDetail() {
 
   const samples = d.samples.map((s) => {
     const rows = s.results.map((r) => `<tr class="${r.exceed === 1 ? 'exceed' : ''}">
-      <td>${esc(r.parameter)}</td><td class="num val">${esc(r.value_text)}</td><td class="muted">${esc(r.unit)}</td>
+      <td><button class="param-link" data-act="chart" data-param="${esc(r.parameter)}" data-media="${esc(s.media || '')}"
+        title="ดูกราฟ ${esc(r.parameter)} ตามวันที่เก็บ">${esc(r.parameter)}${ic('chart')}</button></td>
+      <td class="num val">${esc(r.value_text)}${prevHint(s, r)}</td><td class="muted">${esc(r.unit)}</td>
       <td class="num std-text">${esc(stdText(r))}</td><td>${compareCell(r)}</td></tr>`).join('');
     const meta = [s.sample_code && `รหัส ${s.sample_code}`, s.depth && `ลึก ${s.depth}`, s.sampler && `ผู้เก็บ ${s.sampler}`,
       s.lab && `แล็บ ${s.lab}`, s.report_no && `รายงาน ${s.report_no}`].filter(Boolean).join(' · ');
@@ -514,6 +646,7 @@ $('#detail').addEventListener('click', (e) => {
   else if (act === 'hist-sample') loadDetailHistory({ entity: 'sample', entity_id: t.dataset.id });
   else if (act === 'history') loadDetailHistory({ site_id: d.id });
   else if (act === 'photo') openLightbox(+t.dataset.idx);
+  else if (act === 'chart') TrendChart.open({ param: t.dataset.param, media: t.dataset.media, siteIds: [d.id] });
 });
 $('#detail').addEventListener('change', (e) => {
   if (e.target.dataset.act === 'upload') uploadPhotos([...e.target.files]);
@@ -524,7 +657,7 @@ async function loadDetailHistory(params) {
   box.innerHTML = '<div class="muted small">กำลังโหลด…</div>';
   const list = await guard(() => api('GET', '/api/history?' + new URLSearchParams(params)));
   if (!list) return;
-  box.innerHTML = list.length ? list.map(renderHistoryEntry).join('') : '<div class="muted small">ไม่มีประวัติ</div>';
+  box.innerHTML = list.length ? renderHistoryList(list) : '<div class="muted small">ไม่มีประวัติ</div>';
   box.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
@@ -941,11 +1074,47 @@ async function renderHistoryTab() {
   if ($('#hEntity').value) params.entity = $('#hEntity').value;
   const list = await guard(() => api('GET', '/api/history?' + new URLSearchParams(params)));
   if (!list) return;
-  $('#historyList').innerHTML = list.length ? list.map(renderHistoryEntry).join('') : '<div class="empty-box">ยังไม่มีประวัติ</div>';
+  $('#historyList').innerHTML = list.length ? renderHistoryList(list) : '<div class="empty-box">ยังไม่มีประวัติ</div>';
+}
+// รายการที่ทำพร้อมกัน (แก้/ลบหลายจุด, นำเข้าไฟล์) รวมเป็นก้อนเดียว ย้อนกลับได้ทั้งชุด
+function renderHistoryList(list) {
+  const out = [];
+  for (let i = 0; i < list.length;) {
+    let j = i + 1;
+    while (list[i].batch && j < list.length && list[j].batch === list[i].batch) j++;
+    out.push(j - i > 1 ? renderHistoryGroup(list.slice(i, j)) : renderHistoryEntry(list[i]));
+    i = j;
+  }
+  return out.join('');
+}
+function renderHistoryGroup(items) {
+  const h = items[0];
+  const verbs = { delete: 'ลบ', import: 'นำเข้า', restore: 'ย้อนกลับ', create: 'เพิ่ม', update: 'แก้ไข' };
+  const counts = {};
+  items.forEach((x) => { counts[x.action] = (counts[x.action] || 0) + 1; });
+  const action = Object.entries(counts).sort((a, b) => b[1] - a[1])[0][0];
+  const ents = {};
+  items.forEach((x) => { ents[x.entity] = (ents[x.entity] || 0) + 1; });
+  const words = { site: 'จุด', sample: 'ตัวอย่าง', photo: 'รูป', standard: 'ค่ามาตรฐาน' };
+  const what = Object.entries(ents).map(([e, n]) => `${n} ${words[e] || 'รายการ'}`).join(', ');
+  return `<div class="hist ${action} hist-group">
+    <div class="h"><span class="act">${verbs[action] || action}พร้อมกัน</span> ${esc(what)}
+      <button class="btn small" data-restore-batch="${esc(h.batch)}" title="คืนทุกรายการในชุดนี้เป็นสถานะก่อนการเปลี่ยนแปลง">${ic('undo')}ย้อนกลับทั้งชุด</button></div>
+    <div class="who">${esc(h.user || '')} · ${esc(fmtDateTime(h.at))}</div>
+    <details><summary>ดูทีละรายการ</summary><div class="timeline nested">${items.map(renderHistoryEntry).join('')}</div></details>
+  </div>`;
 }
 $('#hEntity').addEventListener('change', renderHistoryTab);
 $('#hReload').onclick = renderHistoryTab;
 document.addEventListener('click', (e) => {
+  const rb = e.target.closest('[data-restore-batch]');
+  if (rb) {
+    if (!needUser() || !confirm('ย้อนทุกรายการในชุดนี้กลับเป็นสถานะก่อนการเปลี่ยนแปลง?')) return;
+    restoreBatch(rb.dataset.restoreBatch).then(() => {
+      if ($('#tab-history').classList.contains('active')) renderHistoryTab();
+    });
+    return;
+  }
   const r = e.target.closest('[data-restore]');
   if (r) {
     if (!needUser() || !confirm('ย้อนข้อมูลกลับเป็นสถานะก่อนการเปลี่ยนแปลงนี้?')) return;
@@ -1014,9 +1183,10 @@ $$('.tabs button').forEach((b) => b.addEventListener('click', () => {
   $$('.tabs button').forEach((x) => x.classList.toggle('active', x === b));
   moveSlider();
   $$('.tab-panel').forEach((p) => p.classList.toggle('active', p.id === 'tab-' + b.dataset.tab));
-  $('#sidebar').classList.toggle('wide', ['results', 'history', 'standards'].includes(b.dataset.tab));
+  $('#sidebar').classList.toggle('wide', ['results', 'chart', 'history', 'standards'].includes(b.dataset.tab));
   store.set('tab', b.dataset.tab);
   if (b.dataset.tab === 'history') renderHistoryTab();
+  if (b.dataset.tab === 'chart') requestAnimationFrame(() => TrendChart.render());
   setTimeout(() => map.invalidateSize(), 250);
 }));
 

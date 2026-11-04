@@ -50,6 +50,7 @@
       <span class="tab-slider" aria-hidden="true"></span>
       <button data-tab="sites" class="active">จุด/พื้นที่ <span id="cntSites" class="count"></span></button>
       <button data-tab="results">ผลวิเคราะห์ <span id="cntResults" class="count"></span></button>
+      <button data-tab="chart">กราฟ</button>
       <button data-tab="history">ประวัติ</button>
       <button data-tab="standards">ค่ามาตรฐาน</button>
     </nav>
@@ -80,7 +81,52 @@
           <option value="updated">แก้ไขล่าสุดก่อน</option>
         </select>
       </div>
+      <div class="list-bar">
+        <span class="muted small" id="siteCount"></span>
+        <button class="btn small" id="btnSelect" data-i="check">เลือกหลายจุด</button>
+      </div>
       <ul class="site-list first" id="siteList"></ul>
+      <div class="bulk-bar" id="bulkBar" hidden>
+        <div class="bulk-info"><b id="bulkCount">0</b> จุดที่เลือก
+          <button class="link-btn" id="bulkAll"></button>
+          <button class="link-btn" id="bulkClear">ล้าง</button></div>
+        <div class="bulk-actions">
+          <button class="btn small" id="bulkChart" data-i="chart">กราฟเทียบ</button>
+          <button class="btn small" id="bulkEdit" data-i="edit">แก้ไขพร้อมกัน</button>
+          <button class="btn small danger" id="bulkDelete" data-i="trash">ลบ</button>
+          <button class="btn small primary" id="bulkDone">เสร็จ</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-panel" id="tab-chart">
+      <div class="filters">
+        <label class="field">พารามิเตอร์ / สาร<select id="cParam"><option value="">— เลือก —</option></select></label>
+        <label class="field">ประเภทตัวอย่าง<select id="cMedia"><option value="">ทุกประเภท</option></select></label>
+        <label class="field">ช่วงเวลา<select id="cRange">
+          <option value="">ทั้งหมด</option><option value="12">12 เดือนล่าสุด</option>
+          <option value="36">3 ปีล่าสุด</option><option value="custom">กำหนดเอง</option></select></label>
+        <label class="field" id="cFromBox" hidden>ตั้งแต่<input type="date" id="cFrom"></label>
+        <label class="field" id="cToBox" hidden>ถึง<input type="date" id="cTo"></label>
+      </div>
+      <div class="chart-sites">
+        <span class="muted small">จุดที่เปรียบเทียบ</span>
+        <span id="cSiteChips" class="chips"></span>
+        <select id="cAddSite" aria-label="เพิ่มจุดเข้ากราฟ"><option value="">+ เพิ่มจุด</option></select>
+        <button class="link-btn" id="cAuto">เลือกจุดที่มีข้อมูลมากสุดให้</button>
+      </div>
+      <div class="chart-card">
+        <div class="chart-head">
+          <div><div class="chart-title" id="cTitle"></div><div class="muted small" id="cSub"></div></div>
+          <div class="seg" role="group" aria-label="มุมมอง">
+            <button data-view="chart" class="on">กราฟ</button><button data-view="table">ตาราง</button></div>
+        </div>
+        <div class="chart-legend" id="cLegend"></div>
+        <div class="chart" id="chart"></div>
+        <div class="table-wrap" id="cPivotWrap" hidden><table class="data" id="cPivot"></table></div>
+      </div>
+      <div class="sec-h" style="margin:4px 0 0">เทียบกับครั้งก่อนๆ</div>
+      <div class="table-wrap summary-wrap"><table class="data" id="cSummary"></table></div>
     </section>
 
     <section class="tab-panel" id="tab-results">
@@ -173,5 +219,6 @@
 <script src="icons.js"></script>
 <script src="utm.js"></script>
 <script src="app.js"></script>
+<script src="chart.js"></script>
 </body>
 </html>

@@ -111,6 +111,73 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(by[a["id"]]["n_exceed"], 1)       # ดินผิวหน้าใช้เกณฑ์ดิน
         self.assertEqual(by[b["id"]]["n_compared"], 0)     # มีผลแต่ไม่มีเกณฑ์ = ไม่ใช่ "ผ่าน"
 
+    def test_bulk_update_delete_and_batch_restore(self):
+        ids = [self.call("POST", "/api/sites", {"name": f"B{i}", "project": "เดิม", "lat": 13, "lng": 101})[1]["id"]
+               for i in range(3)]
+        st, r = self.call("POST", "/api/sites/bulk", {"ids": ids, "action": "update",
+                                                       "fields": {"project": "ใหม่", "code": "ห้ามแก้"}})
+        self.assertEqual((st, r["count"]), (200, 3))
+        _, sites = self.call("GET", "/api/sites")
+        mine = [s for s in sites if s["id"] in ids]
+        self.assertEqual({s["project"] for s in mine}, {"ใหม่"})
+        self.assertEqual({s["code"] for s in mine}, {None})      # ช่องที่ไม่อนุญาตถูกข้าม
+        _, hist = self.call("GET", f"/api/history?batch={r['batch']}")
+        self.assertEqual(len(hist), 3)
+
+        st, d = self.call("POST", "/api/sites/bulk", {"ids": ids[:2], "action": "delete"})
+        _, sites = self.call("GET", "/api/sites")
+        self.assertEqual(len([s for s in sites if s["id"] in ids]), 1)
+        self.call("POST", f"/api/history/batch/{d['batch']}/restore")       # ย้อนการลบทั้งชุด
+        self.call("POST", f"/api/history/batch/{r['batch']}/restore")       # ย้อนการแก้ทั้งชุด
+        _, sites = self.call("GET", "/api/sites")
+        mine = [s for s in sites if s["id"] in ids]
+        self.assertEqual((len(mine), {s["project"] for s in mine}), (3, {"เดิม"}))
+
+        st, _ = self.call("POST", "/api/sites/bulk", {"ids": ids, "action": "update", "fields": {}})
+        self.assertEqual(st, 400)
+
+    def test_undo_whole_import(self):
+        csv_text = ("site_code,site_name,lat,lng,sample_date,media,parameter,value\n"
+                    "UNDO-1,ก,13,101,2026-01-01,soil,Pb,1\nUNDO-2,ข,13,101,2026-01-01,soil,Pb,2\n")
+        self.call("POST", "/api/import/csv", raw=csv_text.encode())
+        _, hist = self.call("GET", "/api/history?entity=site")
+        batch = next(h["batch"] for h in hist if h["summary"].startswith("UNDO-1"))
+        st, r = self.call("POST", f"/api/history/batch/{batch}/restore")
+        self.assertEqual((st, r["restored"]), (200, 4))
+        _, sites = self.call("GET", "/api/sites")
+        self.assertFalse([s for s in sites if (s["code"] or "").startswith("UNDO")])
+
+    def test_old_database_gets_batch_column(self):
+        import sqlite3
+        path = os.path.join(self.tmp.name, "old.db")
+        c = sqlite3.connect(path)
+        c.execute("CREATE TABLE history(id INTEGER PRIMARY KEY, at TEXT NOT NULL, user TEXT, action TEXT NOT NULL,"
+                  " entity TEXT NOT NULL, entity_id INTEGER, site_id INTEGER, summary TEXT, before TEXT, after TEXT)")
+        c.commit(); c.close()
+        cur = app.DB_PATH
+        try:
+            app.DB_PATH = path
+            app.init_db()
+            cols = [r[1] for r in sqlite3.connect(path).execute("PRAGMA table_info(history)")]
+            self.assertIn("batch", cols)
+        finally:
+            app.DB_PATH = cur
+
+    def test_restore_only_reverts_fields_of_that_change(self):
+        _, a = self.call("POST", "/api/sites", {"name": "เดิม", "project": "P1", "lat": 13, "lng": 101})
+        sid = a["id"]
+        self.call("PUT", f"/api/sites/{sid}", {"name": "ชื่อใหม่"})
+        self.call("PUT", f"/api/sites/{sid}", {"project": "P2"})
+        _, hist = self.call("GET", f"/api/history?entity=site&entity_id={sid}")
+        rename = next(h for h in hist if h["action"] == "update" and h["before"]["name"] == "เดิม")
+        self.call("POST", f"/api/history/{rename['id']}/restore")
+        _, d = self.call("GET", f"/api/sites/{sid}")
+        self.assertEqual((d["name"], d["project"]), ("เดิม", "P2"))   # project ที่แก้ทีหลังยังอยู่
+        self.call("DELETE", f"/api/sites/{sid}")
+        self.call("POST", f"/api/history/{rename['id']}/restore")      # ย้อนการแก้ชื่อซ้ำ ไม่กู้จุดที่ลบ
+        _, sites = self.call("GET", "/api/sites")
+        self.assertNotIn(sid, [x["id"] for x in sites])
+
     def test_validation(self):
         st, r = self.call("POST", "/api/sites", {"name": ""})
         self.assertEqual(st, 400)

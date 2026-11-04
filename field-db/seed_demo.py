@@ -64,6 +64,18 @@ S = [
     ("SD-01", "sediment", "2026-05-27", [("Pb", "512", "mg/kg"), ("Hg", "0.09", "mg/kg")]),
     ("SS-01", "surface_soil", "2026-05-29", [("Pb", "830", "mg/kg"), ("Cd", "12", "mg/kg")]),
 ]
+# ประวัติย้อนหลัง (ตรวจติดตามรายไตรมาส) เพื่อให้กราฟแนวโน้มมีข้อมูลเทียบ
+HIST = {
+    "SW-01": ("surface_water", {"pH": ("", [7.1, 6.9, 6.4, 6.2]), "DO": ("mg/L", [5.8, 5.1, 3.9, 3.2]),
+                                "BOD": ("mg/L", [1.4, 1.9, 3.1, 4.8]), "Pb": ("mg/L", [0.008, 0.011, 0.034, 0.061])}),
+    "SW-02": ("surface_water", {"pH": ("", [7.3, 7.2, 7.4, 7.1]), "DO": ("mg/L", [6.4, 6.0, 6.3, 5.9]),
+                                "BOD": ("mg/L", [1.0, 1.3, 0.9, 1.4]), "Pb": ("mg/L", ["<0.005", "<0.005", 0.006, "<0.005"])}),
+    "GW-01": ("groundwater", {"As": ("mg/L", [0.004, 0.006, 0.009, 0.013]), "Mn": ("mg/L", [0.22, 0.25, 0.27, 0.29])}),
+}
+for code, (media, params) in HIST.items():
+    for i, date in enumerate(["2025-05-20", "2025-08-19", "2025-11-18", "2026-02-17"]):
+        S.append((code, media, date, [(p, str(vals[i]), unit) for p, (unit, vals) in params.items()]))
+
 for code, media, date, res in S:
     app.create_sample(con, U, {"site_id": ids[code], "media": media, "sample_date": date, "sampler": "ทีมภาคสนาม",
                                "lab": "ห้องปฏิบัติการ (ตัวอย่าง)", "sample_code": f"{code}-{date[5:7]}",

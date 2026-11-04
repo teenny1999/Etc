@@ -461,3 +461,100 @@ table.data td.empty { text-align: center; color: var(--muted); padding: 28px; }
   .sample-card .gauge { width: 46px; }
   .verdict { min-width: 0; }
 }
+
+/* ------------------------------------------------ v3: กราฟ / เลือกหลายจุด ------------------------------------------------ */
+.btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+.exceed-v { color: var(--exceed); font-weight: 600; }
+.link-btn { border: 0; background: none; padding: 0 2px; color: var(--ink-2); font: inherit; font-size: 13px; cursor: pointer; text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+.link-btn:hover { color: var(--ink); text-decoration-color: currentColor; }
+.key { display: inline-block; width: 14px; height: 3px; border-radius: 2px; flex: none; }
+
+/* เลือกหลายจุด */
+.list-bar { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: -4px; }
+.site-list.selecting li { grid-template-columns: 16px 12px 1fr; }
+.site-list .pick { margin-top: 5px; pointer-events: none; }
+.site-list li.picked { background: color-mix(in srgb, var(--sel) 9%, var(--panel)); }
+.pin.picked { box-shadow: 0 0 0 3px var(--sel), 0 1px 6px rgba(0, 0, 0, .6); }
+.bulk-bar {
+  position: sticky; bottom: -12px; margin: 0 -12px -12px; padding: 10px 12px; z-index: 2;
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between;
+  background: var(--panel); border-top: 1px solid var(--line); box-shadow: 0 -6px 16px rgba(10, 16, 13, .08);
+  animation: bar-up .24s var(--ease-out);
+}
+.bulk-info { display: flex; gap: 8px; align-items: baseline; font-size: 13.5px; }
+.bulk-info b { font: 600 15px var(--mono); }
+.bulk-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+@keyframes bar-up { from { opacity: 0; transform: translateY(10px); } }
+.bulk-fields { display: grid; grid-template-columns: minmax(150px, 190px) 1fr; gap: 10px 12px; align-items: center; }
+.bulk-on { display: flex; gap: 8px; align-items: center; font-size: 13.5px; cursor: pointer; }
+.toast-action { margin-left: 6px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid rgba(255, 255, 255, .3); background: rgba(255, 255, 255, .1); color: #fff; border-radius: 6px; padding: 3px 9px; cursor: pointer; font: 500 13px var(--sans); }
+.toast-action:hover { background: rgba(255, 255, 255, .2); }
+.toast-action .ic { color: #fff !important; width: 14px; height: 14px; }
+
+/* ค่าครั้งก่อน + ลิงก์ไปกราฟในแผงรายละเอียด */
+.param-link { border: 0; background: none; padding: 0; font: inherit; color: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; text-align: left; }
+.param-link .ic { width: 13px; height: 13px; color: var(--faint); opacity: .55; transition: opacity .15s, color .15s; }
+.param-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.param-link:hover .ic, .param-link:focus-visible .ic { opacity: 1; color: var(--ink); }
+.prev { font: 400 12px var(--sans); color: var(--muted); margin-top: 1px; white-space: nowrap; }
+tr.exceed td.val .prev { font-weight: 400; }
+
+/* แท็บกราฟ */
+label.field { display: flex; flex-direction: column; gap: 3px; font-size: 12.5px; font-weight: 500; color: var(--muted); flex: 1 1 150px; }
+label.field > select, label.field > input { color: var(--ink); font-weight: 400; font-size: 14px; flex: none; }
+.chart-sites { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+.chart-sites .chips { display: contents; }
+.chart-sites select { min-height: 30px; padding: 2px 26px 2px 8px; font-size: 13px; max-width: 260px; }
+.site-chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 4px 0 10px; border: 1px solid var(--line-strong); border-radius: 14px; font: 500 13px var(--mono); background: var(--panel); }
+.site-chip button { border: 0; background: none; color: var(--muted); width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; cursor: pointer; }
+.site-chip button:hover { background: var(--hover); color: var(--ink); }
+.site-chip .ic { width: 13px; height: 13px; }
+.chart-card { border: 1px solid var(--line); border-radius: 10px; background: var(--panel); padding: 14px 14px 10px; flex: none; }
+.chart-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.chart-title { font-size: 16px; font-weight: 600; }
+.seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--r); padding: 2px; gap: 2px; flex: none; }
+.seg button { border: 0; background: none; padding: 3px 10px; border-radius: 4px; font: 500 13px var(--sans); color: var(--muted); cursor: pointer; }
+.seg button.on { background: var(--ink); color: var(--panel); }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 10px 0 2px; font-size: 13px; color: var(--ink-2); }
+.chart-legend span { display: inline-flex; align-items: center; gap: 7px; }
+.chart { position: relative; margin-top: 8px; min-height: 120px; }
+.chart svg { display: block; overflow: visible; }
+.chart .grid { stroke: var(--line); stroke-width: 1; }
+.chart .axis { stroke: var(--line-strong); stroke-width: 1; }
+.chart .tickmark { stroke: var(--line-strong); }
+.chart .tick { fill: var(--muted); font: 12px var(--mono); }
+.chart .std-label { fill: var(--muted); font: 500 12px var(--sans); }
+.chart .end-label { fill: var(--ink-2); font: 500 12px var(--mono); }
+.chart .crosshair { stroke: var(--ink-2); stroke-width: 1; pointer-events: none; }
+.chart .hit { fill: transparent; cursor: crosshair; outline: none; }
+.chart .hit:focus-visible { stroke: var(--ink-2); stroke-dasharray: 3 3; }
+.chart-empty { height: 220px; display: grid; place-items: center; text-align: center; color: var(--muted); font-size: 14px; border: 1px dashed var(--line-strong); border-radius: 8px; padding: 16px; }
+.chart-tip {
+  position: absolute; z-index: 5; min-width: 170px; max-width: 280px; padding: 8px 10px; pointer-events: none;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow-2); font-size: 13px;
+}
+.tip-date { font-weight: 600; margin-bottom: 4px; }
+.tip-row { display: flex; align-items: center; gap: 7px; line-height: 1.7; white-space: nowrap; }
+.tip-row b { font: 600 13px var(--mono); }
+.tip-name { color: var(--muted); font-family: var(--mono); margin-left: auto; padding-left: 8px; }
+#cPivotWrap { max-height: 360px; margin-top: 10px; }
+.summary-wrap { flex: none; }
+#cSummary td { vertical-align: top; }
+#cSummary .when { font: 12px var(--sans); color: var(--muted); }
+#cSummary .change { white-space: nowrap; font-family: var(--sans); }
+#cSummary caption { caption-side: bottom; text-align: left; padding: 8px 10px; font-size: 12.5px; color: var(--muted); }
+#cSummary tbody tr { cursor: pointer; }
+.series-name { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+#cSummary td:first-child { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+
+/* ประวัติที่ทำพร้อมกัน */
+.hist-group details { margin-top: 6px; }
+.hist-group summary { cursor: pointer; font-size: 13px; color: var(--muted); width: max-content; }
+.hist-group summary:hover { color: var(--ink); }
+.timeline.nested { margin-top: 10px; padding-left: 2px; }
+
+@media (max-width: 860px) {
+  .bulk-fields { grid-template-columns: 1fr; gap: 4px 0; }
+  .bulk-on { margin-top: 8px; }
+  .chart-head { flex-wrap: wrap; }
+}

@@ -19,6 +19,7 @@ import sqlite3
 import sys
 import tempfile
 import threading
+import uuid
 import webbrowser
 import zipfile
 import xml.etree.ElementTree as ET
@@ -81,7 +82,7 @@ CREATE TABLE IF NOT EXISTS history(
   id INTEGER PRIMARY KEY,
   at TEXT NOT NULL, user TEXT, action TEXT NOT NULL,
   entity TEXT NOT NULL, entity_id INTEGER, site_id INTEGER,
-  summary TEXT, before TEXT, after TEXT);
+  summary TEXT, before TEXT, after TEXT, batch TEXT);
 CREATE INDEX IF NOT EXISTS idx_samples_site ON samples(site_id);
 CREATE INDEX IF NOT EXISTS idx_results_sample ON results(sample_id);
 CREATE INDEX IF NOT EXISTS idx_photos_site ON photos(site_id);
@@ -115,6 +116,10 @@ def init_db():
     con = connect()
     con.execute("PRAGMA journal_mode = WAL")
     con.executescript(SCHEMA)
+    cols = {r[1] for r in con.execute("PRAGMA table_info(history)")}
+    if "batch" not in cols:  # ฐานข้อมูลจากเวอร์ชันก่อน
+        con.execute("ALTER TABLE history ADD COLUMN batch TEXT")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_history_batch ON history(batch)")
     con.commit()
     con.close()
 
@@ -186,13 +191,28 @@ def snap_standard(con, sid):
 SNAP = {"site": snap_site, "sample": snap_sample, "photo": snap_photo, "standard": snap_standard}
 
 
+# การทำงานที่แก้หลายรายการในคำสั่งเดียว (แก้/ลบหลายจุด, นำเข้าไฟล์, ย้อนกลับทั้งชุด)
+# ใช้รหัสชุดเดียวกันในประวัติ เพื่อให้ดูรวมกันและย้อนกลับได้ในครั้งเดียว
+CTX = threading.local()
+
+
+class batch_scope:
+    def __enter__(self):
+        CTX.batch = uuid.uuid4().hex[:12]
+        return CTX.batch
+
+    def __exit__(self, *exc):
+        CTX.batch = None
+
+
 def log(con, user, action, entity, entity_id, site_id, before, after, summary=None):
     con.execute(
-        "INSERT INTO history(at,user,action,entity,entity_id,site_id,summary,before,after) "
-        "VALUES(?,?,?,?,?,?,?,?,?)",
+        "INSERT INTO history(at,user,action,entity,entity_id,site_id,summary,before,after,batch) "
+        "VALUES(?,?,?,?,?,?,?,?,?,?)",
         (now(), user, action, entity, entity_id, site_id, summary,
          json.dumps(before, ensure_ascii=False) if before is not None else None,
-         json.dumps(after, ensure_ascii=False) if after is not None else None))
+         json.dumps(after, ensure_ascii=False) if after is not None else None,
+         getattr(CTX, "batch", None)))
 
 
 def label_site(d):
@@ -370,14 +390,23 @@ def restore(con, user, hid):
     if not h["before"]:
         raise ApiError(400, "รายการนี้เป็นการสร้างใหม่ ไม่มีข้อมูลก่อนหน้าให้ย้อนกลับ "
                             "(ถ้าต้องการเอาออก ให้ลบรายการนั้นแทน)")
-    data = json.loads(h["before"])
+    before = json.loads(h["before"])
+    after = json.loads(h["after"]) if h["after"] else {}
+    # ย้อนเฉพาะช่องที่รายการนี้เปลี่ยน ไม่ทับการแก้ไขอื่นที่เกิดทีหลัง (เช่น ย้อนการแก้ชื่อไม่ควรกู้จุดที่ถูกลบไปแล้วกลับมา)
+    data = {k: v for k, v in before.items() if k != "id" and after.get(k) != v}
+    if not data:
+        return {"ok": True, "unchanged": True}
     ent, eid = h["entity"], h["entity_id"]
+    if ent == "sample":
+        data.setdefault("site_id", before["site_id"])
+    if ent == "standard":
+        data = {**(snap_standard(con, eid) or {}), **data}
     if ent == "site":
         update_site(con, user, eid, data, action="restore")
     elif ent == "sample":
         # ถ้าจุดของตัวอย่างนี้ถูกลบไปแล้ว ให้กู้จุดคืนมาด้วย ไม่งั้นจะมองไม่เห็นตัวอย่างที่กู้
         site = snap_site(con, data["site_id"])
-        if site and site["deleted"] and not data.get("deleted"):
+        if site and site["deleted"] and data.get("deleted") == 0:
             update_site(con, user, site["id"], {"deleted": 0}, action="restore")
         update_sample(con, user, eid, data, action="restore")
     elif ent == "photo":
@@ -387,6 +416,50 @@ def restore(con, user, hid):
     else:
         raise ApiError(400, "ย้อนกลับรายการประเภทนี้ไม่ได้")
     return {"ok": True}
+
+
+def restore_batch(con, user, batch):
+    rows = con.execute("SELECT * FROM history WHERE batch=? ORDER BY id DESC", (batch,)).fetchall()
+    if not rows:
+        raise ApiError(404, "ไม่พบชุดการเปลี่ยนแปลงนี้")
+    n = 0
+    with batch_scope():
+        for h in rows:  # ย้อนจากรายการล่าสุดไปเก่าสุด สถานะสุดท้ายจึงเท่ากับก่อนทำชุดนี้
+            if h["before"]:
+                restore(con, user, h["id"])
+            elif h["entity"] == "site":      # รายการที่ชุดนี้สร้างขึ้น (เช่น นำเข้า) -> เอาออก
+                update_site(con, user, h["entity_id"], {"deleted": 1}, action="restore")
+            elif h["entity"] == "sample":
+                update_sample(con, user, h["entity_id"], {"deleted": 1}, action="restore")
+            else:
+                continue
+            n += 1
+    return {"ok": True, "restored": n}
+
+
+BULK_FIELDS = ["project", "category", "province", "address", "description"]
+
+
+def bulk_sites(con, user, data):
+    try:
+        ids = sorted({int(i) for i in data.get("ids") or []})
+    except (TypeError, ValueError):
+        raise ApiError(400, "รายการจุดไม่ถูกต้อง")
+    if not ids:
+        raise ApiError(400, "ยังไม่ได้เลือกจุด")
+    action = data.get("action")
+    fields = {k: v for k, v in (data.get("fields") or {}).items() if k in BULK_FIELDS}
+    if action == "update" and not fields:
+        raise ApiError(400, "ยังไม่ได้เลือกช่องที่จะแก้ไข")
+    if action not in ("update", "delete"):
+        raise ApiError(400, "action ต้องเป็น update หรือ delete")
+    with batch_scope() as b:
+        for sid in ids:
+            if action == "delete":
+                update_site(con, user, sid, {"deleted": 1}, action="delete")
+            else:
+                update_site(con, user, sid, fields)
+    return {"ok": True, "count": len(ids), "batch": b}
 
 
 # ---------------------------------------------------------------- queries ---
@@ -504,6 +577,9 @@ def history(con, qs):
     if "entity_id" in qs:
         q += " AND entity_id=?"
         args.append(int(qs["entity_id"]))
+    if "batch" in qs:
+        q += " AND batch=?"
+        args.append(qs["batch"])
     q += " ORDER BY id DESC LIMIT ?"
     args.append(min(int(qs.get("limit", 300)), 5000))
     out = []
@@ -1012,14 +1088,26 @@ def r_restore(h, con, hid):
     return restore(con, h.user, int(hid))
 
 
+@route("POST", r"/api/history/batch/(\w+)/restore")
+def r_restore_batch(h, con, batch):
+    return restore_batch(con, h.user, batch)
+
+
+@route("POST", "/api/sites/bulk")
+def r_sites_bulk(h, con):
+    return bulk_sites(con, h.user, h.body())
+
+
 @route("POST", "/api/import/kml")
 def r_import_kml(h, con):
-    return import_kml(con, h.user, h.raw(), h.filename())
+    with batch_scope():
+        return import_kml(con, h.user, h.raw(), h.filename())
 
 
 @route("POST", "/api/import/csv")
 def r_import_csv(h, con):
-    return import_csv(con, h.user, h.raw())
+    with batch_scope():
+        return import_csv(con, h.user, h.raw())
 
 
 @route("GET", "/api/export/kml")
